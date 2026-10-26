@@ -14,7 +14,9 @@ public final class EndTerrain {
 	private static final double BASE_NOISE_BOUND = 1.1;
 
 	private final EndIslands islands;
-	private final BlendedNoise base;
+	private final long seed;
+	/** Built lazily: biome-only checks never need it and it is the expensive part to set up. */
+	private volatile BlendedNoise base;
 	private final ConcurrentHashMap<Long, double[]> columns = new ConcurrentHashMap<>();
 
 	public EndTerrain(long seed) {
@@ -23,7 +25,16 @@ public final class EndTerrain {
 
 	public EndTerrain(EndIslands islands, long seed) {
 		this.islands = islands;
-		this.base = BlendedNoise.end(seed);
+		this.seed = seed;
+	}
+
+	private BlendedNoise base() {
+		BlendedNoise b = base;
+		if (b == null) {
+			b = BlendedNoise.end(seed);
+			base = b;
+		}
+		return b;
 	}
 
 	public EndIslands islands() {
@@ -69,7 +80,7 @@ public final class EndTerrain {
 			int by = cellY * CELL_HEIGHT;
 			int bz = cellZ * CELL_WIDTH;
 			// final_density is squeeze(interpolated(0.64 * density)); squeeze keeps the sign.
-			v = slide(column[CELL_COUNT_Y + 1] + base.compute(bx, by, bz), by) * 0.64;
+			v = slide(column[CELL_COUNT_Y + 1] + base().compute(bx, by, bz), by) * 0.64;
 			column[cellY] = v;
 		}
 		return v;

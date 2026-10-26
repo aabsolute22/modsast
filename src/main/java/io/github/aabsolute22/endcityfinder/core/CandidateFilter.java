@@ -38,6 +38,19 @@ public final class CandidateFilter {
 
 	public Verdict check(long seed) {
 		EndWorld world = new EndWorld(seed, placement);
+		// Cheap biome pass first: most wrong seeds put some observed city outside highlands/midlands.
+		for (SeedCracker.City city : cities) {
+			boolean any = false;
+			for (SeedCracker.Candidate c : city.candidates()) {
+				if (world.islands().biomeOfChunk(c.chunkX(), c.chunkZ()).allowsEndCity()) {
+					any = true;
+					break;
+				}
+			}
+			if (!any) {
+				return new Verdict(seed, false, "observed city outside city biomes");
+			}
+		}
 		for (SeedCracker.City city : cities) {
 			boolean ok = false;
 			for (SeedCracker.Candidate c : city.candidates()) {
@@ -62,6 +75,7 @@ public final class CandidateFilter {
 		}
 		if (!samples.isEmpty()) {
 			int mismatches = 0;
+			int limit = 1 + samples.size() / 10;
 			for (TerrainSample s : samples) {
 				int predicted = world.terrain().surfaceY(s.x(), s.z());
 				if (predicted == s.surfaceY()) {
@@ -71,22 +85,17 @@ public final class CandidateFilter {
 				if (predicted < 0 && world.islands().biomeOfChunk(s.x() >> 4, s.z() >> 4) == EndBiome.SMALL_ISLANDS) {
 					continue;
 				}
-				mismatches++;
-			}
-			if (mismatches > 1 + samples.size() / 10) {
-				return new Verdict(seed, false, "terrain mismatch " + mismatches + "/" + samples.size());
+				if (++mismatches > limit) {
+					return new Verdict(seed, false, "terrain mismatch");
+				}
 			}
 		}
 		return new Verdict(seed, true, "ok");
 	}
 
 	public List<Long> filter(List<Long> seeds) {
-		List<Long> out = new ArrayList<>();
-		for (long seed : seeds) {
-			if (check(seed).accepted()) {
-				out.add(seed);
-			}
-		}
+		List<Long> out = new ArrayList<>(seeds.parallelStream().filter(seed -> check(seed).accepted()).toList());
+		java.util.Collections.sort(out);
 		return out;
 	}
 }

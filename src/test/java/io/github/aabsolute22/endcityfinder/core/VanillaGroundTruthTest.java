@@ -162,9 +162,14 @@ class VanillaGroundTruthTest {
 		}
 	}
 
+	/** Contents of #minecraft:has_structure/end_city; tags are not bound in a bare registry lookup. */
+	private static boolean isEndCityBiome(Holder<Biome> biome) {
+		return biome.is(Biomes.END_HIGHLANDS) || biome.is(Biomes.END_MIDLANDS);
+	}
+
 	private static Optional<Structure.GenerationStub> vanillaCity(long seed, RandomState state, ChunkPos pos) {
 		Structure.GenerationContext context = new Structure.GenerationContext(RegistryAccess.EMPTY, generator, biomeSource, state,
-				templates, seed, pos, HEIGHT, endCity.biomes()::contains);
+				templates, seed, pos, HEIGHT, VanillaGroundTruthTest::isEndCityBiome);
 		return endCity.findValidGenerationPoint(context);
 	}
 
