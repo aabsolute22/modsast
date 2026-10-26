@@ -68,7 +68,8 @@ public final class EndTerrain {
 			int bx = cellX * CELL_WIDTH;
 			int by = cellY * CELL_HEIGHT;
 			int bz = cellZ * CELL_WIDTH;
-			v = slide(column[CELL_COUNT_Y + 1] + base.compute(bx, by, bz), by);
+			// final_density is squeeze(interpolated(0.64 * density)); squeeze keeps the sign.
+			v = slide(column[CELL_COUNT_Y + 1] + base.compute(bx, by, bz), by) * 0.64;
 			column[cellY] = v;
 		}
 		return v;

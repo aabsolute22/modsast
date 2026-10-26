@@ -53,6 +53,35 @@ public final class EndWorld {
 	 * Returns null when vanilla would not place a city here (regardless of the region placement).
 	 */
 	public EndCity cityAt(int chunkX, int chunkZ) {
+		List<EndCityPieces.Piece> pieces = piecesAt(chunkX, chunkZ);
+		if (pieces == null) {
+			return null;
+		}
+		EndCityPieces.Piece base = pieces.get(0);
+		int minX = Integer.MAX_VALUE;
+		int minZ = Integer.MAX_VALUE;
+		int maxX = Integer.MIN_VALUE;
+		int maxZ = Integer.MIN_VALUE;
+		int maxY = base.y;
+		EndCityPieces.Piece ship = null;
+		for (EndCityPieces.Piece p : pieces) {
+			minX = Math.min(minX, p.minX);
+			minZ = Math.min(minZ, p.minZ);
+			maxX = Math.max(maxX, p.maxX);
+			maxZ = Math.max(maxZ, p.maxZ);
+			maxY = Math.max(maxY, p.maxY);
+			if (p.template == EndCityPieces.Template.SHIP) {
+				ship = p;
+			}
+		}
+		int shipX = ship == null ? 0 : (ship.minX + ship.maxX) / 2;
+		int shipY = ship == null ? 0 : ship.minY + 10;
+		int shipZ = ship == null ? 0 : (ship.minZ + ship.maxZ) / 2;
+		return new EndCity(chunkX, chunkZ, base.y, base.rotation, ship != null, minX, minZ, maxX, maxZ, maxY, shipX, shipY, shipZ);
+	}
+
+	/** Pieces of the city starting in this chunk (base floor first), or null if no city can start here. */
+	List<EndCityPieces.Piece> piecesAt(int chunkX, int chunkZ) {
 		if (!islands.biomeOfChunk(chunkX, chunkZ).allowsEndCity()) {
 			return null;
 		}
@@ -87,27 +116,7 @@ public final class EndWorld {
 		if (y < MIN_CITY_Y) {
 			return null;
 		}
-		List<EndCityPieces.Piece> pieces = EndCityPieces.generate(random, x, y, z, rotation);
-		int minX = Integer.MAX_VALUE;
-		int minZ = Integer.MAX_VALUE;
-		int maxX = Integer.MIN_VALUE;
-		int maxZ = Integer.MIN_VALUE;
-		int maxY = y;
-		EndCityPieces.Piece ship = null;
-		for (EndCityPieces.Piece p : pieces) {
-			minX = Math.min(minX, p.minX);
-			minZ = Math.min(minZ, p.minZ);
-			maxX = Math.max(maxX, p.maxX);
-			maxZ = Math.max(maxZ, p.maxZ);
-			maxY = Math.max(maxY, p.maxY);
-			if (p.template == EndCityPieces.Template.SHIP) {
-				ship = p;
-			}
-		}
-		int shipX = ship == null ? 0 : (ship.minX + ship.maxX) / 2;
-		int shipY = ship == null ? 0 : ship.minY + 10;
-		int shipZ = ship == null ? 0 : (ship.minZ + ship.maxZ) / 2;
-		return new EndCity(chunkX, chunkZ, y, rotation, ship != null, minX, minZ, maxX, maxZ, maxY, shipX, shipY, shipZ);
+		return EndCityPieces.generate(random, x, y, z, rotation);
 	}
 
 	/** The city of a placement region, or null if the region has none. */

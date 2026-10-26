@@ -14,12 +14,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>
  * The pillars leave 2^32 seeds per spike key (see {@link EndSpikes#lowSeedBits}); each of those is checked
  * against the city placement ({@code nextInt} offsets of the region random) and, when known, the city rotation.
+ * The hot path is written with plain locals and a constant divisor so the JIT reliably compiles it well.
  */
 public final class SeedCracker {
 	private static final long MULT = LegacyRandom.MULTIPLIER;
 	private static final long ADD = LegacyRandom.ADDEND;
 	private static final long MASK = LegacyRandom.MASK;
 	private static final int BLOCK = 64;
+	/** spacing - separation of End cities; specialised so {@code % 9} compiles to a multiply. */
+	private static final int END_LIMIT = 9;
 
 	/** A possible start chunk of an observed city; {@code rotation} is -1 when unknown. */
 	public record Candidate(int chunkX, int chunkZ, int rotation) {
@@ -32,27 +35,13 @@ public final class SeedCracker {
 	public record Result(List<Long> seeds, boolean overflow, boolean cancelled) {
 	}
 
-	private static final class CityCheck {
-		final long[] regionK;
-		final int[] candRegion;
-		final int[] candOffsets;
-		final int[] candRotation;
-		final int[] candX;
-		final int[] candZ;
-		final double selectivity;
-
-		CityCheck(long[] regionK, int[] candRegion, int[] candOffsets, int[] candRotation, int[] candX, int[] candZ, double selectivity) {
-			this.regionK = regionK;
-			this.candRegion = candRegion;
-			this.candOffsets = candOffsets;
-			this.candRotation = candRotation;
-			this.candX = candX;
-			this.candZ = candZ;
-			this.selectivity = selectivity;
-		}
+	/** Candidates of one city grouped by placement region. */
+	private record CityCheck(long[] regionK, int[] regionXMask, int[] regionStart, int[] offsets, int[] rotation,
+			int[] chunkX, int[] chunkZ, double selectivity) {
 	}
 
 	private final Placement placement;
+	private final boolean fastPath;
 	private final int[] keys;
 	private final CityCheck[] checks;
 	private final int maxSeeds;
@@ -62,6 +51,7 @@ public final class SeedCracker {
 
 	public SeedCracker(Placement placement, int[] keys, List<City> cities, int maxSeeds) {
 		this.placement = placement;
+		this.fastPath = placement.triangular() && placement.limit() == END_LIMIT;
 		this.keys = keys.clone();
 		this.maxSeeds = maxSeeds;
 		List<CityCheck> list = new ArrayList<>();
@@ -71,7 +61,7 @@ public final class SeedCracker {
 				list.add(check);
 			}
 		}
-		list.sort(Comparator.comparingDouble(c -> c.selectivity));
+		list.sort(Comparator.comparingDouble(CityCheck::selectivity));
 		this.checks = list.toArray(new CityCheck[0]);
 		this.total = (long) this.keys.length * (1 << 16);
 	}
@@ -80,11 +70,11 @@ public final class SeedCracker {
 		return checks.length;
 	}
 
-	/** Expected number of false positives per key; above a few thousand the search should not start. */
+	/** Expected number of seeds that pass by chance; above a few thousand the search should not start. */
 	public double expectedSeeds() {
 		double e = (double) (1L << 32) * keys.length;
 		for (CityCheck c : checks) {
-			e *= Math.min(1.0, c.selectivity);
+			e *= Math.min(1.0, c.selectivity());
 		}
 		return e;
 	}
@@ -115,7 +105,7 @@ public final class SeedCracker {
 
 	private CityCheck compile(City city) {
 		List<Long> regions = new ArrayList<>();
-		List<int[]> cands = new ArrayList<>();
+		List<List<int[]>> byRegion = new ArrayList<>();
 		double selectivity = 0;
 		for (Candidate c : city.candidates()) {
 			int rx = placement.region(c.chunkX());
@@ -130,63 +120,85 @@ public final class SeedCracker {
 			if (index < 0) {
 				index = regions.size();
 				regions.add(k);
+				byRegion.add(new ArrayList<>());
 			}
-			cands.add(new int[] {index, ox << 8 | oz, c.rotation(), c.chunkX(), c.chunkZ()});
+			byRegion.get(index).add(new int[] {ox << 8 | oz, c.rotation(), c.chunkX(), c.chunkZ()});
 			selectivity += offsetProbability(ox) * offsetProbability(oz) * (c.rotation() >= 0 ? 0.25 : 1.0);
 		}
-		if (cands.isEmpty()) {
+		if (regions.isEmpty()) {
 			return null;
 		}
-		int n = cands.size();
-		int[] candRegion = new int[n];
-		int[] candOffsets = new int[n];
-		int[] candRotation = new int[n];
-		int[] candX = new int[n];
-		int[] candZ = new int[n];
-		for (int i = 0; i < n; i++) {
-			int[] c = cands.get(i);
-			candRegion[i] = c[0];
-			candOffsets[i] = c[1];
-			candRotation[i] = c[2];
-			candX[i] = c[3];
-			candZ[i] = c[4];
-		}
+		int n = byRegion.stream().mapToInt(List::size).sum();
 		long[] regionK = new long[regions.size()];
-		for (int i = 0; i < regionK.length; i++) {
-			regionK[i] = regions.get(i);
+		int[] regionXMask = new int[regions.size()];
+		int[] regionStart = new int[regions.size() + 1];
+		int[] offsets = new int[n];
+		int[] rotation = new int[n];
+		int[] chunkX = new int[n];
+		int[] chunkZ = new int[n];
+		int i = 0;
+		for (int r = 0; r < regions.size(); r++) {
+			regionK[r] = regions.get(r);
+			regionStart[r] = i;
+			for (int[] c : byRegion.get(r)) {
+				offsets[i] = c[0];
+				rotation[i] = c[1];
+				chunkX[i] = c[2];
+				chunkZ[i] = c[3];
+				regionXMask[r] |= 1 << (c[0] >>> 8);
+				i++;
+			}
 		}
-		return new CityCheck(regionK, candRegion, candOffsets, candRotation, candX, candZ, selectivity);
+		regionStart[regions.size()] = n;
+		return new CityCheck(regionK, regionXMask, regionStart, offsets, rotation, chunkX, chunkZ, selectivity);
 	}
 
-	private static int nextInt(long[] st, int bound) {
-		long s = (st[0] * MULT + ADD) & MASK;
-		int bits = (int) (s >>> 17);
-		if ((bound & (bound - 1)) == 0) {
-			st[0] = s;
-			return (int) ((long) bound * bits >> 31);
+	/**
+	 * Packed {@code x << 8 | z} region offsets for End city placement, or -1 as soon as x rules out every
+	 * candidate. Falls back to the general path in the (2^-28 rare) case {@code nextInt} would re-roll.
+	 */
+	private int endOffsets(long seed, long k, int xMask) {
+		long s = ((seed + k) ^ MULT) & MASK;
+		s = (s * MULT + ADD) & MASK;
+		int r = (int) (s >>> 17);
+		int a = r % END_LIMIT;
+		if (r - a + (END_LIMIT - 1) < 0) {
+			return generalOffsets(seed, k, xMask);
 		}
-		int value = bits % bound;
-		while (bits - value + (bound - 1) < 0) {
-			s = (s * MULT + ADD) & MASK;
-			bits = (int) (s >>> 17);
-			value = bits % bound;
+		s = (s * MULT + ADD) & MASK;
+		r = (int) (s >>> 17);
+		int b = r % END_LIMIT;
+		if (r - b + (END_LIMIT - 1) < 0) {
+			return generalOffsets(seed, k, xMask);
 		}
-		st[0] = s;
-		return value;
+		int x = (a + b) >> 1;
+		if ((xMask >>> x & 1) == 0) {
+			return -1;
+		}
+		s = (s * MULT + ADD) & MASK;
+		r = (int) (s >>> 17);
+		a = r % END_LIMIT;
+		if (r - a + (END_LIMIT - 1) < 0) {
+			return generalOffsets(seed, k, xMask);
+		}
+		s = (s * MULT + ADD) & MASK;
+		r = (int) (s >>> 17);
+		b = r % END_LIMIT;
+		if (r - b + (END_LIMIT - 1) < 0) {
+			return generalOffsets(seed, k, xMask);
+		}
+		return x << 8 | (a + b) >> 1;
 	}
 
-	private int offsets(long seed, long k, long[] st) {
-		st[0] = ((seed + k) ^ MULT) & MASK;
+	private int generalOffsets(long seed, long k, int xMask) {
+		LegacyRandom random = new LegacyRandom((seed + k));
 		int limit = placement.limit();
-		int x;
-		int z;
-		if (placement.triangular()) {
-			x = (nextInt(st, limit) + nextInt(st, limit)) / 2;
-			z = (nextInt(st, limit) + nextInt(st, limit)) / 2;
-		} else {
-			x = nextInt(st, limit);
-			z = nextInt(st, limit);
+		boolean triangular = placement.triangular();
+		int x = triangular ? (random.nextInt(limit) + random.nextInt(limit)) / 2 : random.nextInt(limit);
+		if ((xMask >>> x & 1) == 0) {
+			return -1;
 		}
+		int z = triangular ? (random.nextInt(limit) + random.nextInt(limit)) / 2 : random.nextInt(limit);
 		return x << 8 | z;
 	}
 
@@ -194,46 +206,69 @@ public final class SeedCracker {
 		return (s * MULT + ADD) & MASK;
 	}
 
+	/** {@code nextInt(4)} of {@code setLargeFeatureSeed(seed, chunkX, chunkZ)}, given its two nextLong values. */
 	private static int rotation(long seed, long a, long b, int chunkX, int chunkZ) {
 		long s = (((long) chunkX * a ^ (long) chunkZ * b ^ seed) ^ MULT) & MASK;
 		return (int) (step(s) >>> 46);
 	}
 
-	private boolean check(long seed, long[] st, int[] offs) {
+	boolean check(long seed) {
 		long a = 0;
 		long b = 0;
-		boolean ab = false;
-		for (CityCheck c : checks) {
-			for (int r = 0; r < c.regionK.length; r++) {
-				offs[r] = offsets(seed, c.regionK[r], st);
-			}
+		boolean haveAB = false;
+		CityCheck[] checks = this.checks;
+		for (int ci = 0; ci < checks.length; ci++) {
+			CityCheck c = checks[ci];
+			long[] regionK = c.regionK;
 			boolean ok = false;
-			for (int i = 0; i < c.candRegion.length; i++) {
-				if (offs[c.candRegion[i]] != c.candOffsets[i]) {
+			for (int r = 0; r < regionK.length && !ok; r++) {
+				int off = fastPath ? endOffsets(seed, regionK[r], c.regionXMask[r]) : generalOffsets(seed, regionK[r], c.regionXMask[r]);
+				if (off < 0) {
 					continue;
 				}
-				if (c.candRotation[i] >= 0) {
-					if (!ab) {
-						long t1 = step((seed ^ MULT) & MASK);
-						long t2 = step(t1);
-						long t3 = step(t2);
-						long t4 = step(t3);
-						a = ((long) (int) (t1 >>> 16) << 32) + (int) (t2 >>> 16);
-						b = ((long) (int) (t3 >>> 16) << 32) + (int) (t4 >>> 16);
-						ab = true;
-					}
-					if (rotation(seed, a, b, c.candX[i], c.candZ[i]) != c.candRotation[i]) {
+				int end = c.regionStart[r + 1];
+				for (int i = c.regionStart[r]; i < end; i++) {
+					if (c.offsets[i] != off) {
 						continue;
 					}
+					int rot = c.rotation[i];
+					if (rot >= 0) {
+						if (!haveAB) {
+							long t1 = step((seed ^ MULT) & MASK);
+							long t2 = step(t1);
+							long t3 = step(t2);
+							long t4 = step(t3);
+							a = ((long) (int) (t1 >>> 16) << 32) + (int) (t2 >>> 16);
+							b = ((long) (int) (t3 >>> 16) << 32) + (int) (t4 >>> 16);
+							haveAB = true;
+						}
+						if (rotation(seed, a, b, c.chunkX[i], c.chunkZ[i]) != rot) {
+							continue;
+						}
+					}
+					ok = true;
+					break;
 				}
-				ok = true;
-				break;
 			}
 			if (!ok) {
 				return false;
 			}
 		}
 		return true;
+	}
+
+	/** Checks all 2^16 seeds with these low 32 bits. Returns true when the result limit overflowed. */
+	private boolean scanLow(long low, ConcurrentLinkedQueue<Long> found, AtomicInteger foundCount) {
+		for (long hi = 0; hi < 1 << 16; hi++) {
+			long seed = hi << 32 | low;
+			if (check(seed)) {
+				found.add(seed);
+				if (foundCount.incrementAndGet() > maxSeeds) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/** Runs the search on {@code threads} threads and blocks until it finishes or is cancelled. */
@@ -244,16 +279,8 @@ public final class SeedCracker {
 		AtomicInteger nextBlock = new AtomicInteger();
 		int blocksPerKey = (1 << 16) / BLOCK;
 		int totalBlocks = keys.length * blocksPerKey;
-		int maxRegions = 1;
-		for (CityCheck c : checks) {
-			maxRegions = Math.max(maxRegions, c.regionK.length);
-		}
-		final int regionsScratch = maxRegions;
 		int[][] lowCache = new int[keys.length][];
-		Object lock = new Object();
 		Runnable worker = () -> {
-			long[] st = new long[1];
-			int[] offs = new int[regionsScratch];
 			while (!cancel.get() && !overflow.get()) {
 				int block = nextBlock.getAndIncrement();
 				if (block >= totalBlocks) {
@@ -261,7 +288,7 @@ public final class SeedCracker {
 				}
 				int keyIndex = block / blocksPerKey;
 				int[] lows;
-				synchronized (lock) {
+				synchronized (lowCache) {
 					lows = lowCache[keyIndex];
 					if (lows == null) {
 						lows = EndSpikes.lowSeedBits(keys[keyIndex]);
@@ -270,16 +297,9 @@ public final class SeedCracker {
 				}
 				int u0 = (block % blocksPerKey) * BLOCK;
 				for (int u = u0; u < u0 + BLOCK; u++) {
-					long low = lows[u] & 0xFFFFFFFFL;
-					for (long hi = 0; hi < 1 << 16; hi++) {
-						long seed = hi << 32 | low;
-						if (check(seed, st, offs)) {
-							found.add(seed);
-							if (foundCount.incrementAndGet() > maxSeeds) {
-								overflow.set(true);
-								return;
-							}
-						}
+					if (scanLow(lows[u] & 0xFFFFFFFFL, found, foundCount)) {
+						overflow.set(true);
+						return;
 					}
 					done.incrementAndGet();
 					if (cancel.get()) {
