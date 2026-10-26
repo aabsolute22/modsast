@@ -1,0 +1,25 @@
+{
+	"schemaVersion": 1,
+	"id": "endcityfinder",
+	"version": "${version}",
+	"name": "End City Finder",
+	"description": "Recovers the End layout from a few observed End cities and the obsidian pillars, then shows every other End city.",
+	"authors": ["aabsolute22"],
+	"contact": {
+		"sources": "https://github.com/aabsolute22/modsast"
+	},
+	"license": "MIT",
+	"icon": "assets/endcityfinder/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"io.github.aabsolute22.endcityfinder.client.EndCityFinderClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

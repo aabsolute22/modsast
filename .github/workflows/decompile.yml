@@ -1,0 +1,31 @@
+# Internal helper: decompiles Minecraft so the vanilla API can be studied.
+# Runs only when this file changes.
+name: decompile
+on:
+  push:
+    paths:
+      - '.github/workflows/decompile.yml'
+
+jobs:
+  sources:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+      - run: chmod +x ./gradlew
+      - name: gen sources
+        run: ./gradlew genSources --no-configuration-cache -Dorg.gradle.jvmargs=-Xmx6G
+      - name: collect
+        run: |
+          mkdir -p out
+          find ~/.gradle .gradle -name '*.jar' -path '*minecraft*' 2>/dev/null | grep -vi 'fabric-api\|loader\|intermediary' | tee out/jars.txt
+          for f in $(find ~/.gradle .gradle -name '*.jar' -path '*minecraft*' 2>/dev/null | grep -E 'minecraft-(common|clientOnly|merged|client)' ); do cp "$f" out/; done
+          ls -la out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mc-sources
+          path: out/
+          retention-days: 3
