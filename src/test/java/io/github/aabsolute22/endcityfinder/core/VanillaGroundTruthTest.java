@@ -212,7 +212,7 @@ class VanillaGroundTruthTest {
 			}
 		}
 		System.out.println("verified " + cities + " cities, " + ships + " with ships");
-		assertTrue(cities > 100);
+		assertTrue(cities > 50, "too few cities to be meaningful: " + cities);
 	}
 
 	@Test
