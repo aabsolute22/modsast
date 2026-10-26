@@ -43,6 +43,24 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 		log("ok: " + message);
 	}
 
+	/** Waits for a condition; on timeout dumps the mod state and a screenshot before failing. */
+	private static void await(ClientGameTestContext context, String what, java.util.function.Predicate<net.minecraft.client.Minecraft> condition, int timeout) {
+		try {
+			context.waitFor(condition, timeout);
+		} catch (AssertionError e) {
+			FinderSession s = session();
+			if (s != null) {
+				log("TIMEOUT waiting for " + what + "; phase " + s.phase() + " (" + s.detail() + "), spikes " + s.knownSpikes()
+						+ ", empty chunks " + s.emptyChunkCount() + ", samples " + s.sampleCount() + ", candidates " + s.candidateCount());
+				for (FinderSession.ObservedCity c : s.cities()) {
+					log("  city #" + c.id + " exact=" + c.exact + " auto=" + c.auto + " " + c.describe());
+				}
+			}
+			context.takeScreenshot("ecf_timeout");
+			throw e;
+		}
+	}
+
 	private static void teleport(TestDedicatedServerContext server, double x, double y, double z) {
 		server.runCommand(String.format("execute in minecraft:the_end run tp Player0 %.1f %.1f %.1f", x, y, z));
 	}
@@ -89,7 +107,7 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			// 1. Pillars: fly to the main island and let the mod read them.
 			teleportFacing(server, 0, 130, 60, 0, 80, 0);
 			connection.waitForChunksDownload(MINUTE);
-			context.waitFor(mc -> session().knownSpikes() == 10, 2 * MINUTE);
+			await(context, "pillars", mc -> session().knownSpikes() == 10, 2 * MINUTE);
 			check(session().knownSpikes() == 10, "all 10 pillars read");
 			context.takeScreenshot("ecf_pillars");
 
@@ -98,17 +116,17 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 				EndCity city = cities.get(i);
 				teleport(server, city.x() + 0.5, city.y() + 12, city.z() + 0.5);
 				connection.waitForChunksDownload(MINUTE);
-				context.waitFor(mc -> hasExactCity(city), 3 * MINUTE);
+				await(context, "city " + i, mc -> hasExactCity(city), 3 * MINUTE);
 				check(hasExactCity(city), "city " + i + " detected exactly at chunk " + city.chunkX() + " " + city.chunkZ() + " " + city.rotation());
 			}
 
 			// 3. The solver must land on the real seed.
-			context.waitFor(mc -> session().phase() == FinderSession.Phase.SOLVED, 15 * MINUTE);
+			await(context, "solve", mc -> session().phase() == FinderSession.Phase.SOLVED, 15 * MINUTE);
 			check(session().phase() == FinderSession.Phase.SOLVED, "solved: " + session().detail());
 			check(session().worlds().size() == 1 && session().worlds().get(0).seed() == (SEED & ((1L << 48) - 1)), "found the real structure seed");
 
 			// 4. Predictions match the ground truth around the player.
-			context.waitFor(mc -> !session().predicted().isEmpty(), 2 * MINUTE);
+			await(context, "predictions", mc -> !session().predicted().isEmpty(), 2 * MINUTE);
 			double px = context.computeOnClient(mc -> mc.player.getX());
 			double pz = context.computeOnClient(mc -> mc.player.getZ());
 			Set<Long> predicted = new HashSet<>();

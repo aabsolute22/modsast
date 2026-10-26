@@ -115,16 +115,20 @@ public final class WorldScanner {
 		}
 		scanned.add(key);
 		if (minY != Integer.MAX_VALUE) {
-			if (Math.abs(cx) > MIN_CITY_CHUNK_DISTANCE || Math.abs(cz) > MIN_CITY_CHUNK_DISTANCE) {
+			if (chunkDistanceSq(cx, cz) > (long) MIN_CITY_CHUNK_DISTANCE * MIN_CITY_CHUNK_DISTANCE) {
 				cityChunks.put(key, new CityChunk(minY, columns.toLongArray()));
 				cityChunksChanged = true;
 			}
 			return;
 		}
 		session.addEmptyChunk(cx, cz);
-		if ((Math.abs(cx) > SAMPLE_MIN_CHUNK_DISTANCE || Math.abs(cz) > SAMPLE_MIN_CHUNK_DISTANCE) && Math.floorMod(cx * 31 + cz * 17, 5) == 0) {
+		if (chunkDistanceSq(cx, cz) > (long) SAMPLE_MIN_CHUNK_DISTANCE * SAMPLE_MIN_CHUNK_DISTANCE && Math.floorMod(cx * 31 + cz * 17, 5) == 0) {
 			session.addSample(cx * 16 + 8, cz * 16 + 8, topEndStone(sections, minSection, 8, 8));
 		}
+	}
+
+	private static long chunkDistanceSq(int cx, int cz) {
+		return (long) cx * cx + (long) cz * cz;
 	}
 
 	/** Highest end stone in a chunk column below y 128 (the End noise ceiling), or -1. */
@@ -266,6 +270,7 @@ public final class WorldScanner {
 			BaseFloorLocator.Result located = BaseFloorLocator.locate(minX, minZ, maxX, maxZ);
 			List<SeedCracker.Candidate> candidates = located.candidates();
 			FinderSession.ObservedCity city = session.addCity(candidates, centerX, centerZ, !nearOnly, located.exact());
+			EndCityFinderClient.LOG.info("City base at y {} footprint {} {}..{} {} -> {}", minY, minX, minZ, maxX, maxZ, city.describe());
 			added.add(city);
 			if (!nearOnly) {
 				EndCityFinderClient.onCityDetected(city);
