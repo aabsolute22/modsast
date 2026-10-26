@@ -41,6 +41,7 @@ public class EndCityFinderClient implements ClientModInitializer {
 	private static KeyMapping markersKey;
 	private static KeyMapping addKey;
 	private static int ticks;
+	private static int lastEvidence;
 
 	@Override
 	public void onInitializeClient() {
@@ -142,6 +143,14 @@ public class EndCityFinderClient implements ClientModInitializer {
 			}
 		}
 		FinderSession.Phase phase = s.phase();
+		// While several seeds remain, newly explored chunks and terrain samples can rule some out.
+		if (phase == FinderSession.Phase.AMBIGUOUS && ticks % 200 == 0) {
+			int evidence = s.emptyChunkCount() + s.sampleCount();
+			if (evidence > lastEvidence + 64) {
+				lastEvidence = evidence;
+				s.requestSolve();
+			}
+		}
 		if (phase != lastPhase) {
 			if (lastPhase != null && (phase == FinderSession.Phase.SOLVED || phase == FinderSession.Phase.CONTRADICTION
 					|| phase == FinderSession.Phase.NEED_MORE_CITIES || phase == FinderSession.Phase.AMBIGUOUS)) {

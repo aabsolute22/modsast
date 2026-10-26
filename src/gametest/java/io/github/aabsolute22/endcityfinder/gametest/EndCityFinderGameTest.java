@@ -76,7 +76,11 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 		properties.setProperty("view-distance", "10");
 		properties.setProperty("simulation-distance", "6");
 		try (TestDedicatedServerContext server = context.worldBuilder()
-				.adjustSettings(creator -> creator.setSeed(Long.toString(SEED)))
+				.adjustSettings(creator -> {
+					creator.setSeed(Long.toString(SEED));
+					// Consistent test settings turn structures off; End cities are the whole point here.
+					creator.setGenerateStructures(true);
+				})
 				.createServer(properties);
 				TestDedicatedServerConnection connection = server.connect()) {
 			server.runCommand("gamemode creative Player0");

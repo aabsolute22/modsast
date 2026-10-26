@@ -45,7 +45,7 @@ jobs:
       - name: print screenshots
         if: always()
         run: |
-          for f in $(find build/run -name 'ecf_*.png' | sort); do
+          for f in $(find build/run -name '*ecf_*.png' | sort); do
             convert "$f" -resize 1000x -quality 75 /tmp/shot.jpg || cp "$f" /tmp/shot.jpg
             echo "=== SCREENSHOT $(basename "$f") ==="
             base64 -w0 /tmp/shot.jpg
