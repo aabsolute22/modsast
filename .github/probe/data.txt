@@ -1,0 +1,5 @@
+data/minecraft/tags/worldgen/biome/has_structure/end_city.json
+data/minecraft/worldgen/structure_set/end_cities.json
+data/minecraft/worldgen/structure/end_city.json
+data/minecraft/worldgen/noise_settings/end.json
+data/minecraft/worldgen/configured_feature/end_spike.json
