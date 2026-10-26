@@ -1,0 +1,15 @@
+{
+	"schemaVersion": 1,
+	"id": "endcityfinder-gametest",
+	"version": "1.0.0",
+	"name": "End City Finder client game test",
+	"environment": "*",
+	"entrypoints": {
+		"fabric-client-gametest": [
+			"io.github.aabsolute22.endcityfinder.gametest.EndCityFinderGameTest"
+		]
+	},
+	"depends": {
+		"endcityfinder": "*"
+	}
+}
