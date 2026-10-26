@@ -544,7 +544,6 @@ public final class FinderSession {
 			setStatus(Phase.AMBIGUOUS, seeds.size() + " кандидатов, показываю общие города; найди ещё город или полетай");
 		}
 		predictedAtX = Double.NaN;
-		EndCityFinderClient.onSolverUpdate(this);
 	}
 
 	// ---------------------------------------------------------------- predictions
