@@ -1,2 +1,0 @@
-data/minecraft/worldgen/density_function/end/sloped_cheese.json
-data/minecraft/worldgen/density_function/end/base_3d_noise.json

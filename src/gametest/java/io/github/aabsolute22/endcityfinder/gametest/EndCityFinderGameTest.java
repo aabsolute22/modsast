@@ -73,6 +73,8 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 	}
 
 	private static void teleportFacing(TestDedicatedServerContext server, double x, double y, double z, double fx, double fy, double fz) {
+		// A block to stand on, otherwise the creative player falls out of the shot while chunks render.
+		server.runCommand(String.format("execute in minecraft:the_end run setblock %d %d %d minecraft:glass", (int) Math.floor(x), (int) Math.floor(y) - 1, (int) Math.floor(z)));
 		server.runCommand(String.format("execute in minecraft:the_end run tp Player0 %.1f %.1f %.1f facing %.1f %.1f %.1f", x, y, z, fx, fy, fz));
 	}
 
