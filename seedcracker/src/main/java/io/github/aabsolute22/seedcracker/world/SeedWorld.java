@@ -157,6 +157,103 @@ public final class SeedWorld {
 		return biomeId(biome(blockX >> 2, blockY >> 2, blockZ >> 2));
 	}
 
+	/** Biomes that only exist underground; a surface search looks above them. */
+	public static final java.util.Set<String> CAVE_BIOMES = java.util.Set.of("lush_caves", "dripstone_caves", "deep_dark", "sulfur_caves");
+
+	/** The biome a player standing on the surface would see, without computing the terrain. */
+	public String surfaceBiome(int x, int z) {
+		if (dim != Dim.OVERWORLD) {
+			return biomeIdAt(x, 64, z);
+		}
+		String id = "?";
+		for (int y : new int[] {72, 100, 140, 190}) {
+			id = biomeIdAt(x, y, z);
+			if (!CAVE_BIOMES.contains(id)) {
+				return id;
+			}
+		}
+		return id;
+	}
+
+	private boolean biomeMatches(String target, int x, int z) {
+		if (dim == Dim.OVERWORLD && CAVE_BIOMES.contains(target)) {
+			for (int y : new int[] {-30, 0, 30}) {
+				if (biomeIdAt(x, y, z).equals(target)) {
+					return true;
+				}
+			}
+			return false;
+		}
+		if (dim == Dim.NETHER) {
+			for (int y : new int[] {40, 70, 100}) {
+				if (biomeIdAt(x, y, z).equals(target)) {
+					return true;
+				}
+			}
+			return false;
+		}
+		return surfaceBiome(x, z).equals(target);
+	}
+
+	/**
+	 * Nearest spots of a biome in square rings around (x, z), sampled every {@code step} blocks; results are at least
+	 * a few steps apart so one big patch does not fill the list.
+	 */
+	public List<BlockPos> findBiome(String target, double x, double z, int radius, int step, int max) {
+		List<BlockPos> out = new ArrayList<>();
+		int x0 = (int) Math.floor(x);
+		int z0 = (int) Math.floor(z);
+		int minGap = step * 6;
+		for (int r = 0; r <= radius && out.size() < max; r += step) {
+			int n = r == 0 ? 1 : 8 * (r / step);
+			for (int i = 0; i < n && out.size() < max; i++) {
+				int px;
+				int pz;
+				if (r == 0) {
+					px = x0;
+					pz = z0;
+				} else {
+					int side = i / (2 * (r / step));
+					int along = i % (2 * (r / step)) * step - r;
+					switch (side) {
+						case 0 -> {
+							px = x0 + along;
+							pz = z0 - r;
+						}
+						case 1 -> {
+							px = x0 + r;
+							pz = z0 + along;
+						}
+						case 2 -> {
+							px = x0 - along;
+							pz = z0 + r;
+						}
+						default -> {
+							px = x0 - r;
+							pz = z0 - along;
+						}
+					}
+				}
+				if (!biomeMatches(target, px, pz)) {
+					continue;
+				}
+				boolean far = true;
+				for (BlockPos b : out) {
+					if (Math.abs(b.getX() - px) < minGap && Math.abs(b.getZ() - pz) < minGap) {
+						far = false;
+						break;
+					}
+				}
+				if (far) {
+					int py = dim != Dim.OVERWORLD ? 64 : CAVE_BIOMES.contains(target) ? 0 : surfaceY(px, pz);
+					out.add(new BlockPos(px, py, pz));
+				}
+			}
+		}
+		out.sort((a, b) -> Double.compare(Math.hypot(a.getX() - x, a.getZ() - z), Math.hypot(b.getX() - x, b.getZ() - z)));
+		return out;
+	}
+
 	public int surfaceY(int blockX, int blockZ) {
 		return generator.getBaseHeight(blockX, blockZ, Heightmap.Types.WORLD_SURFACE_WG, heightAccessor, randomState);
 	}
