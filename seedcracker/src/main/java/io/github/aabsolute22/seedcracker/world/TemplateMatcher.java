@@ -1,0 +1,83 @@
+package io.github.aabsolute22.seedcracker.world;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import io.github.aabsolute22.seedcracker.core.StructureKind;
+
+/**
+ * Finds start pieces from one anchor block: every variant that has that block type gives one possible template
+ * position; only positions whose start chunk origin is chunk-aligned survive, and those are scored block by block.
+ */
+public final class TemplateMatcher {
+	/** Canonical block id at a world position, or null if that position is not loaded. */
+	public interface BlockSource {
+		String canonAt(int x, int y, int z);
+	}
+
+	public record Match(StartTemplates.Variant variant, int chunkX, int chunkZ, int baseY, int matched, int checked) {
+		public StructureKind kind() {
+			return variant.spec().kind();
+		}
+
+		public double score() {
+			return checked == 0 ? 0 : (double) matched / checked;
+		}
+	}
+
+	private final StartTemplates templates;
+
+	public TemplateMatcher(StartTemplates templates) {
+		this.templates = templates;
+	}
+
+	public StartTemplates templates() {
+		return templates;
+	}
+
+	/** Matches anchored on the block {@code canon} at (x, y, z); several variants may agree on one start. */
+	public List<Match> fromAnchor(int x, int y, int z, String canon, BlockSource source) {
+		List<Match> out = new ArrayList<>();
+		for (StartTemplates.Variant v : templates.variantsAnchoredOn(canon)) {
+			for (int i : v.anchors()) {
+				int ox = x - v.dx()[i];
+				int oz = z - v.dz()[i];
+				if ((ox & 15) != 0 || (oz & 15) != 0) {
+					continue;
+				}
+				Match m = score(v, ox, y - v.dy()[i], oz, source);
+				if (m != null) {
+					out.add(m);
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Scores a variant placed at (originX, baseY, originZ); null if it clearly does not fit. */
+	public static Match score(StartTemplates.Variant v, int originX, int baseY, int originZ, TemplateMatcher.BlockSource source) {
+		int n = v.dx().length;
+		double threshold = v.spec().threshold();
+		int allowedMisses = (int) Math.floor(n * (1 - threshold));
+		int matched = 0;
+		int checked = 0;
+		int misses = 0;
+		for (int i = 0; i < n; i++) {
+			String c = source.canonAt(originX + v.dx()[i], baseY + v.dy()[i], originZ + v.dz()[i]);
+			if (c == null) {
+				continue;
+			}
+			checked++;
+			if (c.equals(v.canon()[i])) {
+				matched++;
+			} else if (++misses > allowedMisses) {
+				return null;
+			}
+		}
+		int minChecked = Math.min(n, Math.max(10, n / 2));
+		if (checked < minChecked || matched < threshold * checked) {
+			return null;
+		}
+		return new Match(v, originX >> 4, originZ >> 4, baseY, matched, checked);
+	}
+}

@@ -118,3 +118,5 @@ net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents
 net.minecraft.client.gui.components.AbstractWidget|public
 net.minecraft.client.gui.components.Checkbox|public
 net.minecraft.client.gui.components.CycleButton|public static|builder
+net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate$JigsawBlockInfo
+net.minecraft.nbt.CompoundTag|getString|getInt|getStringOr|getIntOr

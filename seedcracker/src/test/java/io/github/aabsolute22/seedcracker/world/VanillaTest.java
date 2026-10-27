@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.server.Bootstrap;
@@ -247,6 +248,101 @@ class VanillaTest {
 			System.out.printf("locate %-18s %3d%s%n", kind.id(), found.size(), found.isEmpty() ? "" : " nearest " + found.get(0));
 			assertFalse(found.isEmpty(), kind.id());
 		}
+	}
+
+	/**
+	 * The detector's idea of where each start template sits relative to its chunk, checked against the pieces vanilla
+	 * builds: template position, rotation pivot, and a full match from one anchor block on the vanilla-placed blocks.
+	 */
+	@Test
+	void templateGeometryMatchesVanilla() {
+		StartTemplates templates = new StartTemplates(worldgen);
+		TemplateMatcher matcher = new TemplateMatcher(templates);
+		System.out.println("start templates: " + templates.specs().size() + ", anchors " + templates.anchors());
+		Map<String, int[]> stats = new LinkedHashMap<>();
+		for (long seed : seeds(2, 10)) {
+			for (SeedWorld.Dim dim : SeedWorld.Dim.values()) {
+				SeedWorld w = new SeedWorld(worldgen, seed, dim);
+				for (StructureKind kind : StructureKind.values()) {
+					if (kind.overworld != dim.overworld() || kind.spread == null || !w.hasSet(kind.spread) || kind.spread.spacing() <= 2) {
+						continue;
+					}
+					if (templates.specs().stream().noneMatch(sp -> sp.kind() == kind)) {
+						continue;
+					}
+					for (int rx = -4; rx <= 4; rx++) {
+						for (int rz = -4; rz <= 4; rz++) {
+							long p = kind.spread.potentialChunk(seed, rx, rz);
+							int cx = Packed.x(p);
+							int cz = Packed.z(p);
+							Optional<StructureStart> start = w.startAt(w.set(kind.spread), cx, cz);
+							if (start.isEmpty() || start.get().getPieces().isEmpty()) {
+								continue;
+							}
+							StructurePiece first = start.get().getPieces().get(0);
+							net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate template;
+							net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings settings;
+							BlockPos templatePos;
+							if (first instanceof PoolElementStructurePiece pool
+									&& pool.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single) {
+								template = worldgen.templates().getOrCreate(single.getTemplateLocation());
+								settings = new net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings().setRotation(pool.getRotation());
+								templatePos = pool.getPosition();
+							} else if (first instanceof TemplateStructurePiece t) {
+								template = t.template();
+								settings = t.placeSettings();
+								templatePos = t.templatePosition();
+							} else {
+								continue;
+							}
+							StartTemplates.Spec spec = null;
+							for (StartTemplates.Spec sp : templates.specs()) {
+								if (sp.kind() == kind && worldgen.templates().getOrCreate(net.minecraft.resources.Identifier.withDefaultNamespace(sp.template())) == template) {
+									spec = sp;
+								}
+							}
+							String key = kind.id();
+							int[] st = stats.computeIfAbsent(key, k -> new int[3]);
+							st[0]++;
+							if (spec == null) {
+								continue;
+							}
+							BlockPos predicted = spec.templateOffset(settings.getRotation()).offset(cx * 16, 0, cz * 16);
+							assertEquals(predicted.getX(), templatePos.getX(), key + " template x " + spec.template());
+							assertEquals(predicted.getZ(), templatePos.getZ(), key + " template z " + spec.template());
+							assertEquals(spec.rotationPivot(), settings.getRotationPivot(), key + " pivot");
+							// Place the template the vanilla way and let the matcher find it from one anchor.
+							Map<Long, String> blocks = new java.util.HashMap<>();
+							for (var info : StartTemplates.blocks(template)) {
+								BlockPos wp = templatePos.offset(net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.calculateRelativePosition(settings, info.pos()));
+								String canon = Canon.of(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(info.state().getBlock()).getPath());
+								blocks.put(BlockPos.asLong(wp.getX(), wp.getY(), wp.getZ()), canon);
+							}
+							TemplateMatcher.BlockSource source = (x, y, z) -> blocks.getOrDefault(BlockPos.asLong(x, y, z), "air");
+							StartTemplates.Spec finalSpec = spec;
+							BlockPos anchorPos = null;
+							for (var info : StartTemplates.blocks(template)) {
+								BlockPos wp = templatePos.offset(net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.calculateRelativePosition(settings, info.pos()));
+								if (finalSpec.anchor().equals(blocks.get(BlockPos.asLong(wp.getX(), wp.getY(), wp.getZ())))) {
+									anchorPos = wp;
+									break;
+								}
+							}
+							assertTrue(anchorPos != null, key + " anchor " + spec.anchor());
+							List<TemplateMatcher.Match> matches = matcher.fromAnchor(anchorPos.getX(), anchorPos.getY(), anchorPos.getZ(), spec.anchor(), source);
+							boolean ok = matches.stream().anyMatch(m -> m.chunkX() == cx && m.chunkZ() == cz && m.variant().rotation() == settings.getRotation()
+									&& m.variant().mirror() == settings.getMirror() && m.baseY() == templatePos.getY());
+							assertTrue(ok, key + " matcher on " + spec.template() + " rot " + settings.getRotation() + " mirror " + settings.getMirror() + ": " + matches);
+							st[1]++;
+							if (matches.stream().allMatch(m -> m.chunkX() == cx && m.chunkZ() == cz)) {
+								st[2]++;
+							}
+						}
+					}
+				}
+			}
+		}
+		stats.forEach((k, v) -> System.out.printf("template %-22s starts %3d matched %3d unambiguous %3d%n", k, v[0], v[1], v[2]));
 	}
 
 	/** Seed → vanilla structures → observations → cracker → hashed seed → the same seed. */
