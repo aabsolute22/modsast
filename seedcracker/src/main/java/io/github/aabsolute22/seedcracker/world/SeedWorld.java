@@ -32,7 +32,6 @@ import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
-import net.minecraft.world.level.levelgen.structure.TemplateStructurePiece;
 import net.minecraft.world.level.levelgen.structure.pieces.StructurePieceType;
 import net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
@@ -100,7 +99,7 @@ public final class SeedWorld {
 	private final ChunkGeneratorStructureState structureState;
 	private final LevelHeightAccessor heightAccessor;
 	private final Map<String, Holder<StructureSet>> sets = new HashMap<>();
-	private final Map<Long, Optional<Found>> found = new ConcurrentHashMap<>();
+	private final Map<String, Optional<Found>> found = new ConcurrentHashMap<>();
 	private volatile List<Found> strongholds;
 
 	public SeedWorld(Worldgen worldgen, long seed, Dim dim) {
@@ -168,16 +167,22 @@ public final class SeedWorld {
 
 	// ---------------------------------------------------------------- structures
 
-	/** Mirrors {@code ChunkGenerator.createStructures} for one structure set and chunk. */
-	public Optional<StructureStart> startAt(Holder<StructureSet> set, int chunkX, int chunkZ) {
+	/** A start that passed placement and biome checks; its pieces are only built on demand. */
+	public record Stub(Holder<Structure> structure, Structure.GenerationStub stub, int chunkX, int chunkZ) {
+	}
+
+	/**
+	 * Mirrors {@code ChunkGenerator.createStructures} for one structure set and chunk, stopping at the generation
+	 * point (biome and terrain checks included) instead of assembling every piece.
+	 */
+	public Optional<Stub> stubAt(Holder<StructureSet> set, int chunkX, int chunkZ) {
 		StructurePlacement placement = set.value().placement();
 		if (!placement.isStructureChunk(structureState, chunkX, chunkZ)) {
 			return Optional.empty();
 		}
-		ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 		List<StructureSet.StructureSelectionEntry> entries = set.value().structures();
 		if (entries.size() == 1) {
-			return tryGenerate(entries.get(0), pos);
+			return tryStub(entries.get(0).structure(), chunkX, chunkZ);
 		}
 		List<StructureSet.StructureSelectionEntry> left = new ArrayList<>(entries);
 		WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
@@ -197,9 +202,9 @@ public final class SeedWorld {
 				k++;
 			}
 			StructureSet.StructureSelectionEntry chosen = left.get(k);
-			Optional<StructureStart> start = tryGenerate(chosen, pos);
-			if (start.isPresent()) {
-				return start;
+			Optional<Stub> stub = tryStub(chosen.structure(), chunkX, chunkZ);
+			if (stub.isPresent()) {
+				return stub;
 			}
 			left.remove(k);
 			total -= chosen.weight();
@@ -207,11 +212,24 @@ public final class SeedWorld {
 		return Optional.empty();
 	}
 
-	private Optional<StructureStart> tryGenerate(StructureSet.StructureSelectionEntry entry, ChunkPos pos) {
-		Structure structure = entry.structure().value();
-		StructureStart start = structure.generate(entry.structure(), dim.level, worldgen.registries(), generator, biomeSource, randomState,
-				worldgen.templates(), seed, pos, 0, heightAccessor, structure.biomes()::contains);
-		return start.isValid() ? Optional.of(start) : Optional.empty();
+	private Structure.GenerationContext context(Structure structure, int chunkX, int chunkZ) {
+		return new Structure.GenerationContext(worldgen.registries(), generator, biomeSource, randomState, worldgen.templates(), seed,
+				new ChunkPos(chunkX, chunkZ), heightAccessor, structure.biomes()::contains);
+	}
+
+	private Optional<Stub> tryStub(Holder<Structure> holder, int chunkX, int chunkZ) {
+		return holder.value().findValidGenerationPoint(context(holder.value(), chunkX, chunkZ)).map(st -> new Stub(holder, st, chunkX, chunkZ));
+	}
+
+	/** The complete start with all pieces, exactly as the server would place it. */
+	public Optional<StructureStart> startAt(Holder<StructureSet> set, int chunkX, int chunkZ) {
+		return stubAt(set, chunkX, chunkZ).map(this::build).filter(StructureStart::isValid);
+	}
+
+	public StructureStart build(Stub stub) {
+		Structure structure = stub.structure().value();
+		return structure.generate(stub.structure(), dim.level, worldgen.registries(), generator, biomeSource, randomState, worldgen.templates(), seed,
+				new ChunkPos(stub.chunkX(), stub.chunkZ()), 0, heightAccessor, structure.biomes()::contains);
 	}
 
 	public Holder<StructureSet> set(Spread spread) {
@@ -226,7 +244,7 @@ public final class SeedWorld {
 
 	/** The structure of {@code spread}'s set starting in this chunk, if any. */
 	public Optional<Found> at(Spread spread, int chunkX, int chunkZ) {
-		long key = Packed.pack(chunkX, chunkZ) * 31 + spread.salt() * 7919L + spread.spacing();
+		String key = spread.id() + ":" + chunkX + ":" + chunkZ;
 		Optional<Found> cached = found.get(key);
 		if (cached != null) {
 			return cached;
@@ -234,7 +252,7 @@ public final class SeedWorld {
 		Holder<StructureSet> set = sets.get(spread.id());
 		Optional<Found> result = Optional.empty();
 		if (set != null) {
-			result = startAt(set, chunkX, chunkZ).map(start -> describe(start, chunkX, chunkZ)).filter(f -> f.kind() != null);
+			result = stubAt(set, chunkX, chunkZ).map(this::describe).filter(f -> f.kind() != null);
 		}
 		if (found.size() > 50_000) {
 			found.clear();
@@ -283,7 +301,7 @@ public final class SeedWorld {
 		return out;
 	}
 
-	/** Buried treasure and mineshafts can start in any chunk; only chunks passing the cheap draw are generated. */
+	/** Buried treasure and mineshafts can start in any chunk; only chunks passing the cheap draw are checked. */
 	private List<Found> nearPerChunk(StructureKind kind, Spread spread, double x, double z, int radius) {
 		int r = Math.min(radius, 1024) >> 4;
 		int ccx = (int) Math.floor(x) >> 4;
@@ -301,6 +319,7 @@ public final class SeedWorld {
 		return out;
 	}
 
+	/** All 128 strongholds at their ring positions (the portal room is filled in by {@link #details}). */
 	public List<Found> strongholds() {
 		List<Found> s = strongholds;
 		if (s != null) {
@@ -312,7 +331,7 @@ public final class SeedWorld {
 			List<ChunkPos> positions = structureState.getRingPositionsFor(rings);
 			if (positions != null) {
 				for (ChunkPos pos : positions) {
-					startAt(set, pos.x(), pos.z()).map(start -> describe(start, pos.x(), pos.z())).ifPresent(out::add);
+					stubAt(set, pos.x(), pos.z()).map(this::describe).ifPresent(out::add);
 				}
 			}
 		}
@@ -320,20 +339,56 @@ public final class SeedWorld {
 		return out;
 	}
 
-	private Found describe(StructureStart start, int chunkX, int chunkZ) {
-		Structure structure = start.getStructure();
-		String id = worldgen.registries().lookupOrThrow(Registries.STRUCTURE).getKey(structure) instanceof Identifier ident ? ident.getPath() : "?";
+	/** Builds the pieces of a found structure: exact bounding box, stronghold portal room, blaze spawners. */
+	public Found details(Found f) {
+		if (f.box() != null) {
+			return f;
+		}
+		String key = "details:" + f.kind().id() + ":" + f.chunkX() + ":" + f.chunkZ();
+		Optional<Found> cached = found.get(key);
+		if (cached != null && cached.isPresent()) {
+			return cached.get();
+		}
+		Holder<StructureSet> set = f.kind() == StructureKind.STRONGHOLD ? sets.get("strongholds") : sets.get(f.kind().spread.id());
+		Found result = f;
+		if (set != null) {
+			Optional<StructureStart> start = startAt(set, f.chunkX(), f.chunkZ());
+			if (start.isPresent()) {
+				result = describeStart(f, start.get());
+			}
+		}
+		found.put(key, Optional.of(result));
+		return result;
+	}
+
+	private String structureId(Structure structure) {
+		Identifier id = worldgen.registries().lookupOrThrow(Registries.STRUCTURE).getKey(structure);
+		return id != null ? id.getPath() : "?";
+	}
+
+	private Found describe(Stub stub) {
+		String id = stub.structure().unwrapKey().map(k -> k.identifier().getPath()).orElseGet(() -> structureId(stub.structure().value()));
 		StructureKind kind = StructureKind.ofStructure(id, dim.overworld());
+		BlockPos pos = stub.stub().position();
+		int x = pos.getX();
+		int y = pos.getY();
+		int z = pos.getZ();
+		if (kind == StructureKind.BURIED_TREASURE) {
+			x = stub.chunkX() * 16 + 9;
+			z = stub.chunkZ() * 16 + 9;
+			y = oceanFloorY(x, z) - 1;
+		}
+		return new Found(kind, id, stub.chunkX(), stub.chunkZ(), x, y, z, null, variantOf(id, null), List.of());
+	}
+
+	private Found describeStart(Found f, StructureStart start) {
 		List<StructurePiece> pieces = start.getPieces();
-		BoundingBox box = start.getBoundingBox();
 		StructurePiece first = pieces.isEmpty() ? null : pieces.get(0);
-		BoundingBox target = first != null ? first.getBoundingBox() : box;
-		String variant = variantOf(id, first);
 		List<BlockPos> extras = new ArrayList<>();
-		int x = (target.minX() + target.maxX()) / 2;
-		int z = (target.minZ() + target.maxZ()) / 2;
-		int y = (target.minY() + target.maxY()) / 2;
-		if (kind == StructureKind.STRONGHOLD) {
+		int x = f.x();
+		int y = f.y();
+		int z = f.z();
+		if (f.kind() == StructureKind.STRONGHOLD) {
 			for (StructurePiece p : pieces) {
 				if (p.getType() == StructurePieceType.STRONGHOLD_PORTAL_ROOM) {
 					BoundingBox b = p.getBoundingBox();
@@ -342,23 +397,15 @@ public final class SeedWorld {
 					z = (b.minZ() + b.maxZ()) / 2;
 				}
 			}
-		} else if (kind == StructureKind.FORTRESS) {
+		} else if (f.kind() == StructureKind.FORTRESS) {
 			for (StructurePiece p : pieces) {
 				if (p.getType() == StructurePieceType.NETHER_FORTRESS_MONSTER_THRONE) {
 					BoundingBox b = p.getBoundingBox();
 					extras.add(new BlockPos((b.minX() + b.maxX()) / 2, b.minY() + 5, (b.minZ() + b.maxZ()) / 2));
 				}
 			}
-		} else if (kind == StructureKind.BURIED_TREASURE) {
-			x = chunkX * 16 + 9;
-			z = chunkZ * 16 + 9;
-			y = oceanFloorY(x, z) - 1;
-		} else if (!(first instanceof TemplateStructurePiece) && !(first instanceof PoolElementStructurePiece) && dim.overworld()
-				&& kind != StructureKind.OCEAN_MONUMENT && kind != StructureKind.MINESHAFT) {
-			// Code-built pieces (temples) settle on the ground only when placed; use the terrain height.
-			y = surfaceY(x, z);
 		}
-		return new Found(kind, id, chunkX, chunkZ, x, y, z, box, variant, extras);
+		return new Found(f.kind(), f.structure(), f.chunkX(), f.chunkZ(), x, y, z, start.getBoundingBox(), variantOf(f.structure(), first), extras);
 	}
 
 	private static String variantOf(String id, StructurePiece first) {

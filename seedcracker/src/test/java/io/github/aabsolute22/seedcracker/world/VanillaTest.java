@@ -167,7 +167,7 @@ class VanillaTest {
 					int pick = Spread.firstWeightedPick(seed, f.get().chunkX(), f.get().chunkZ(), Observation.NETHER_WEIGHTS);
 					if (f.get().kind() == StructureKind.BASTION) {
 						assertEquals(Observation.PICK_BASTION, pick);
-					} else if (!"basalt_deltas".equals(w.biomeIdAt(f.get().chunkX() * 16 + 8, 64, f.get().chunkZ() * 16 + 8))) {
+					} else if (!basaltNear(w, f.get().chunkX(), f.get().chunkZ())) {
 						assertEquals(Observation.PICK_FORTRESS, pick, "fortress outside basalt deltas");
 					}
 					checked++;
@@ -175,6 +175,20 @@ class VanillaTest {
 			}
 		}
 		assertTrue(checked > 100);
+	}
+
+	/** Same rule as the client: a bastion could only have been rejected if basalt deltas are near its start. */
+	private static boolean basaltNear(SeedWorld w, int chunkX, int chunkZ) {
+		for (int dx = -40; dx <= 56; dx += 8) {
+			for (int dz = -40; dz <= 56; dz += 8) {
+				for (int y = 24; y <= 56; y += 16) {
+					if ("basalt_deltas".equals(w.biomeIdAt(chunkX * 16 + dx, y, chunkZ * 16 + dz))) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	@Test

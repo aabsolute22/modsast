@@ -38,7 +38,9 @@ public final class Worldgen {
 		List<Registry.PendingTags<?>> pending = TagLoader.loadTagsForExistingRegistries(resources, layers.getLayer(RegistryLayer.STATIC));
 		RegistryAccess.Frozen forLoading = layers.getAccessForLoading(RegistryLayer.WORLDGEN);
 		List<HolderLookup.RegistryLookup<?>> lookups = TagLoader.buildUpdatedLookups(forLoading, pending);
-		registries = RegistryDataLoader.load(resources, lookups, RegistryDataLoader.WORLDGEN_REGISTRIES, Runnable::run).join();
+		RegistryAccess.Frozen worldgen = RegistryDataLoader.load(resources, lookups, RegistryDataLoader.WORLDGEN_REGISTRIES, Runnable::run).join();
+		// Structure pieces also look up static registries (blocks for processors), so expose both layers.
+		registries = layers.replaceFrom(RegistryLayer.WORLDGEN, worldgen).compositeAccess();
 		Files.createDirectories(tempDir);
 		templates = new StructureTemplateManager(resources, LevelStorageSource.createDefault(tempDir).createAccess("templates"),
 				DataFixers.getDataFixer(), BuiltInRegistries.BLOCK);
