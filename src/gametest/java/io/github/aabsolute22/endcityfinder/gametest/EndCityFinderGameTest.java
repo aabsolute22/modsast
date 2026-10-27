@@ -61,6 +61,13 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 		}
 	}
 
+	private static void typeCommand(ClientGameTestContext context, String command) {
+		context.getInput().pressKey(options -> options.keyChat);
+		context.getInput().typeChars(command);
+		context.getInput().holdKeyFor(InputConstants.KEY_RETURN, 0);
+		context.waitTicks(2);
+	}
+
 	private static void teleport(TestDedicatedServerContext server, double x, double y, double z) {
 		server.runCommand(String.format("execute in minecraft:the_end run tp Player0 %.1f %.1f %.1f", x, y, z));
 	}
@@ -111,7 +118,14 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			check(session().knownSpikes() == 10, "all 10 pillars read");
 			context.takeScreenshot("ecf_pillars");
 
-			// 2. Three cities: stand above each one and wait for automatic detection.
+			// 2a. A city typed in by hand, the way a player who already knows a start chunk would.
+			EndCity manual = cities.get(6);
+			typeCommand(context, "/ecf chunk " + manual.chunkX() + " " + manual.chunkZ());
+			await(context, "manual chunk", mc -> session().cities().stream().anyMatch(c -> !c.auto && c.candidates.size() == 1
+					&& c.candidates.get(0)[0] == manual.chunkX() && c.candidates.get(0)[1] == manual.chunkZ()), MINUTE);
+			check(true, "manual /ecf chunk accepted");
+
+			// 2b. Three cities: stand above each one and wait for automatic detection.
 			for (int i = 0; i < 3; i++) {
 				EndCity city = cities.get(i);
 				teleport(server, city.x() + 0.5, city.y() + 12, city.z() + 0.5);
@@ -144,7 +158,7 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			EndCity next = cities.get(3);
 			teleportFacing(server, next.x() + 70, next.maxY() + 25, next.z() + 70, next.x(), next.y() + 20, next.z());
 			connection.waitForChunksRender(MINUTE);
-			context.waitTicks(40);
+			context.waitTicks(100);
 			context.takeScreenshot("ecf_near_city");
 
 			// Far markers: look across the End from high up between cities.
@@ -160,14 +174,10 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			context.setScreen(() -> null);
 
 			// 7. Client command through the chat, like a player would type it.
-			context.getInput().pressKey(options -> options.keyChat);
-			context.getInput().typeChars("/ecf list 8");
-			context.getInput().holdKeyFor(InputConstants.KEY_RETURN, 0);
+			typeCommand(context, "/ecf list 8");
 			context.waitTicks(20);
 			context.takeScreenshot("ecf_list");
-			context.getInput().pressKey(options -> options.keyChat);
-			context.getInput().typeChars("/ecf status");
-			context.getInput().holdKeyFor(InputConstants.KEY_RETURN, 0);
+			typeCommand(context, "/ecf status");
 			context.waitTicks(20);
 			context.takeScreenshot("ecf_status");
 			log("done");

@@ -154,7 +154,7 @@ public final class Commands {
 		}
 		List<FinderSession.ObservedCity> cities = s.cities();
 		long exact = cities.stream().filter(c -> c.exact).count();
-		source.sendFeedback(Component.literal("End City Finder: " + s.phase() + "  " + s.detail()).withStyle(ChatFormatting.GOLD));
+		source.sendFeedback(Component.literal("End City Finder: " + HudOverlay.phaseName(s.phase()) + " · " + s.detail()).withStyle(ChatFormatting.GOLD));
 		source.sendFeedback(Component.literal("пилоны " + s.knownSpikes() + "/10 · города " + cities.size() + " (точных " + exact + ") · пустых чанков "
 				+ s.emptyChunkCount() + " · сэмплов рельефа " + s.sampleCount() + " · кандидатов " + s.candidateCount()));
 		double p = s.progress();

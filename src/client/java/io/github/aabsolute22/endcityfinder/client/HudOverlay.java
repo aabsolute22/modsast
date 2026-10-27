@@ -20,6 +20,19 @@ public final class HudOverlay {
 	private HudOverlay() {
 	}
 
+	static String phaseName(FinderSession.Phase phase) {
+		return switch (phase) {
+			case NEED_PILLARS -> "нужны пилоны";
+			case NEED_CITIES -> "нужен город";
+			case NEED_MORE_CITIES -> "нужно больше городов";
+			case SEARCHING -> "перебор";
+			case FILTERING -> "проверка кандидатов";
+			case AMBIGUOUS -> "несколько вариантов";
+			case SOLVED -> "сид найден";
+			case CONTRADICTION -> "противоречие";
+		};
+	}
+
 	static String statusText(FinderSession s) {
 		StringBuilder b = new StringBuilder("ECF · ");
 		switch (s.phase()) {

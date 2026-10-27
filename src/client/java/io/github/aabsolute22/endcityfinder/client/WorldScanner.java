@@ -268,6 +268,11 @@ public final class WorldScanner {
 				continue;
 			}
 			BaseFloorLocator.Result located = BaseFloorLocator.locate(minX, minZ, maxX, maxZ);
+			if (!nearOnly && !located.exact()) {
+				// Floating ships and player builds also contain purpur; only a matching base floor counts.
+				EndCityFinderClient.LOG.info("Ignoring purpur cluster at y {} footprint {} {}..{} {}: not a city base floor", minY, minX, minZ, maxX, maxZ);
+				continue;
+			}
 			List<SeedCracker.Candidate> candidates = located.candidates();
 			FinderSession.ObservedCity city = session.addCity(candidates, centerX, centerZ, !nearOnly, located.exact());
 			EndCityFinderClient.LOG.info("City base at y {} footprint {} {}..{} {} -> {}", minY, minX, minZ, maxX, maxZ, city.describe());

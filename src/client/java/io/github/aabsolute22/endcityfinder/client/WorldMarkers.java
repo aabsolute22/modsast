@@ -22,6 +22,8 @@ import io.github.aabsolute22.endcityfinder.core.EndCity;
  */
 public final class WorldMarkers {
 	private static final int MAX_MARKERS = 40;
+	private static final int MAX_FAR_MARKERS = 16;
+	private static final int MAX_FAR_LABELS = 6;
 	private static final double FAR_MARKER_DISTANCE = 48.0;
 
 	private WorldMarkers() {
@@ -57,9 +59,17 @@ public final class WorldMarkers {
 		cities.sort(Comparator.comparingDouble(c -> Math.hypot(c.x() - cam.x, c.z() - cam.z)));
 		try (Gizmos.TemporaryCollection ignored = context.levelRenderer().collectPerFrameRenderThreadGizmos()) {
 			if (settings.worldMarkers) {
+				int far = 0;
 				for (int i = 0; i < Math.min(MAX_MARKERS, cities.size()); i++) {
 					EndCity city = cities.get(i);
-					drawCity(s, city, target, cam, settings);
+					boolean isTarget = target != null && city.key() == target.key();
+					if (Math.hypot(city.x() - cam.x, city.z() - cam.z) < settings.nearDistance) {
+						drawNearCity(s, city, target, cam);
+					} else if (isTarget || far < MAX_FAR_MARKERS) {
+						// Only the closest few far cities get a label, otherwise the horizon turns into a word cloud.
+						drawFarCity(s, city, target, cam, isTarget || far < MAX_FAR_LABELS, far);
+						far++;
+					}
 				}
 			}
 			if (settings.arrow && target != null) {
@@ -68,38 +78,44 @@ public final class WorldMarkers {
 		}
 	}
 
-	private static void drawCity(FinderSession s, EndCity city, EndCity target, Vec3 cam, Settings settings) {
+	private static String text(FinderSession s, EndCity city, double distance) {
+		return (city.ship() ? "Город с кораблём · " : "Город · ") + (int) distance + " м" + (s.isVisited(city) ? " · посещён" : "");
+	}
+
+	private static void drawNearCity(FinderSession s, EndCity city, EndCity target, Vec3 cam) {
 		int color = color(s, city, target);
 		double cx = city.x() + 0.5;
 		double cz = city.z() + 0.5;
 		double distance = Math.hypot(cx - cam.x, cz - cam.z);
-		String text = (city.ship() ? "Город с кораблём · " : "Город · ") + (int) distance + " м" + (s.isVisited(city) ? " · посещён" : "");
-		if (distance < settings.nearDistance) {
-			Gizmos.line(new Vec3(cx, city.y(), cz), new Vec3(cx, 320, cz), color, 3.0f).setAlwaysOnTop();
-			Gizmos.cuboid(new AABB(city.minX(), city.y(), city.minZ(), city.maxX() + 1, city.maxY() + 1, city.maxZ() + 1), GizmoStyle.stroke(color, 2.0f));
-			Vec3 labelPos = new Vec3(cx, city.maxY() + 6, cz);
-			Gizmos.billboardText(text, labelPos, label(color, labelPos.distanceTo(cam))).setAlwaysOnTop();
-			if (city.ship()) {
-				Vec3 ship = new Vec3(city.shipX() + 0.5, city.shipY(), city.shipZ() + 0.5);
-				Gizmos.cuboid(new AABB(ship.x - 1.5, ship.y - 1.5, ship.z - 1.5, ship.x + 1.5, ship.y + 1.5, ship.z + 1.5),
-						GizmoStyle.strokeAndFill(HudOverlay.COLOR_SHIP, 2.0f, 0x60FFC94A)).setAlwaysOnTop();
-				Gizmos.billboardText("корабль, элитры", ship.add(0, 3, 0), label(HudOverlay.COLOR_SHIP, ship.distanceTo(cam))).setAlwaysOnTop();
-			}
-			return;
+		Gizmos.line(new Vec3(cx, city.y(), cz), new Vec3(cx, 320, cz), color, 3.0f).setAlwaysOnTop();
+		Gizmos.cuboid(new AABB(city.minX(), city.y(), city.minZ(), city.maxX() + 1, city.maxY() + 1, city.maxZ() + 1), GizmoStyle.stroke(color, 2.0f));
+		Vec3 labelPos = new Vec3(cx, city.maxY() + 6, cz);
+		Gizmos.billboardText(text(s, city, distance), labelPos, label(color, labelPos.distanceTo(cam))).setAlwaysOnTop();
+		if (city.ship()) {
+			Vec3 ship = new Vec3(city.shipX() + 0.5, city.shipY(), city.shipZ() + 0.5);
+			Gizmos.cuboid(new AABB(ship.x - 1.5, ship.y - 1.5, ship.z - 1.5, ship.x + 1.5, ship.y + 1.5, ship.z + 1.5),
+					GizmoStyle.strokeAndFill(HudOverlay.COLOR_SHIP, 2.0f, 0x60FFC94A)).setAlwaysOnTop();
+			Gizmos.billboardText("корабль, элитры", ship.add(0, 3, 0), label(HudOverlay.COLOR_SHIP, ship.distanceTo(cam))).setAlwaysOnTop();
 		}
-		// Far away: a short pillar plus label at a fixed distance in the city's direction.
+	}
+
+	/** A short pillar (plus label) at a fixed distance in the city's direction, so it is never clipped. */
+	private static void drawFarCity(FinderSession s, EndCity city, EndCity target, Vec3 cam, boolean withLabel, int index) {
+		int color = color(s, city, target);
+		double cx = city.x() + 0.5;
+		double cz = city.z() + 0.5;
 		Vec3 aim = new Vec3(cx, Math.max(city.maxY(), cam.y), cz);
-		Vec3 dir = aim.subtract(cam).normalize();
-		Vec3 p = cam.add(dir.scale(FAR_MARKER_DISTANCE));
+		Vec3 p = cam.add(aim.subtract(cam).normalize().scale(FAR_MARKER_DISTANCE));
 		Gizmos.line(p.add(0, -4, 0), p.add(0, 4, 0), color, 4.0f).setAlwaysOnTop();
-		Gizmos.billboardText(text, p.add(0, 5.5, 0), label(color, FAR_MARKER_DISTANCE)).setAlwaysOnTop();
+		if (withLabel) {
+			double distance = Math.hypot(cx - cam.x, cz - cam.z);
+			Gizmos.billboardText(text(s, city, distance), p.add(0, 5.5 + (index % 3) * 1.4, 0), label(color, FAR_MARKER_DISTANCE)).setAlwaysOnTop();
+		}
 	}
 
 	/** A 3D arrow floating in front of the player, pointing at the target city. */
 	private static void drawArrow(Minecraft mc, EndCity target, Vec3 cam) {
-		double yaw = Math.toRadians(mc.player.getYRot());
-		double fx = -Math.sin(yaw);
-		double fz = Math.cos(yaw);
+		Vec3 look = mc.player.getViewVector(1.0f);
 		double tx = target.x() + 0.5 - cam.x;
 		double tz = target.z() + 0.5 - cam.z;
 		double length = Math.hypot(tx, tz);
@@ -108,7 +124,8 @@ public final class WorldMarkers {
 		}
 		tx /= length;
 		tz /= length;
-		Vec3 base = cam.add(fx * 2.5, -0.9, fz * 2.5);
+		// Just below the crosshair wherever the player looks.
+		Vec3 base = cam.add(look.scale(3.0)).add(0, -0.7, 0);
 		Vec3 tail = base.add(-tx * 0.6, 0, -tz * 0.6);
 		Vec3 tip = base.add(tx * 0.6, 0, tz * 0.6);
 		int color = target.ship() ? HudOverlay.COLOR_SHIP : HudOverlay.COLOR_TARGET;
