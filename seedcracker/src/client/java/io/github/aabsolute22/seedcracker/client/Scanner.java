@@ -250,7 +250,11 @@ public final class Scanner {
 				monumentPending.add(Packed.pack(cx, cz));
 			}
 		} else if (counts.getOrDefault("nether_bricks", 0) > 30) {
+			// The crossing reaches into the next chunks east and south; whichever of them arrives last completes it.
 			checkFortress(level, session, cx, cz);
+			checkFortress(level, session, cx - 1, cz);
+			checkFortress(level, session, cx, cz - 1);
+			checkFortress(level, session, cx - 1, cz - 1);
 		}
 	}
 
@@ -546,6 +550,9 @@ public final class Scanner {
 	 */
 	private void checkFortress(ClientLevel level, Session session, int cx, int cz) {
 		long key = Packed.pack(cx, cz);
+		if (fortressChecked.contains(key)) {
+			return;
+		}
 		BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
 		int ox = cx * 16 + 2;
 		int oz = cz * 16 + 2;
@@ -566,7 +573,7 @@ public final class Scanner {
 					}
 				}
 			}
-			if (bricks >= total * 0.9) {
+			if (bricks >= total * 0.9 && crossingShape(level, p, ox, y, oz)) {
 				if (!fortressChecked.add(key)) {
 					return;
 				}
@@ -575,6 +582,34 @@ public final class Scanner {
 				return;
 			}
 		}
+	}
+
+	/**
+	 * Solid brick masses (castle floors, pillars) also fill the cross; a real crossing has an open walkway above its
+	 * deck and empty corners, which no other fortress piece can occupy.
+	 */
+	private boolean crossingShape(ClientLevel level, BlockPos.MutableBlockPos p, int ox, int deckY, int oz) {
+		int open = 0;
+		int checked = 0;
+		for (int t : new int[] {0, 4, 8, 12, 16, 18}) {
+			for (int[] d : new int[][] {{t, 9}, {9, t}}) {
+				String c = canonAt(level, p, ox + d[0], deckY + 2, oz + d[1]);
+				checked++;
+				if (c != null && !c.equals("nether_bricks")) {
+					open++;
+				}
+			}
+		}
+		for (int[] d : new int[][] {{0, 0}, {18, 0}, {0, 18}, {18, 18}, {2, 2}, {16, 2}, {2, 16}, {16, 16}, {4, 4}, {14, 4}, {4, 14}, {14, 14}}) {
+			for (int dy = 0; dy <= 1; dy++) {
+				String c = canonAt(level, p, ox + d[0], deckY + dy, oz + d[1]);
+				checked++;
+				if (c != null && !c.equals("nether_bricks")) {
+					open++;
+				}
+			}
+		}
+		return open >= checked * 0.9;
 	}
 
 	/** Fortress vs bastion is decided before biomes, unless basalt deltas veto the bastion; be careful near them. */
