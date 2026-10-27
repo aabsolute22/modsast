@@ -57,13 +57,15 @@ public final class WorldMarkers {
 		EndCity target = s.target(cam.x, cam.z, settings);
 		List<EndCity> cities = new ArrayList<>(s.predicted());
 		cities.sort(Comparator.comparingDouble(c -> Math.hypot(c.x() - cam.x, c.z() - cam.z)));
+		// Gizmos past the render distance are not drawn, so only cities well inside it get the full treatment.
+		double nearLimit = Math.min(settings.nearDistance, mc.options.getEffectiveRenderDistance() * 16 * 0.75);
 		try (Gizmos.TemporaryCollection ignored = context.levelRenderer().collectPerFrameRenderThreadGizmos()) {
 			if (settings.worldMarkers) {
 				int far = 0;
 				for (int i = 0; i < Math.min(MAX_MARKERS, cities.size()); i++) {
 					EndCity city = cities.get(i);
 					boolean isTarget = target != null && city.key() == target.key();
-					if (Math.hypot(city.x() - cam.x, city.z() - cam.z) < settings.nearDistance) {
+					if (Math.hypot(city.x() - cam.x, city.z() - cam.z) < nearLimit) {
 						drawNearCity(s, city, target, cam);
 					} else if (isTarget || far < MAX_FAR_MARKERS) {
 						// Only the closest few far cities get a label, otherwise the horizon turns into a word cloud.
@@ -87,7 +89,10 @@ public final class WorldMarkers {
 		double cx = city.x() + 0.5;
 		double cz = city.z() + 0.5;
 		double distance = Math.hypot(cx - cam.x, cz - cam.z);
-		Gizmos.line(new Vec3(cx, city.y(), cz), new Vec3(cx, 320, cz), color, 3.0f).setAlwaysOnTop();
+		// Beam limited to the camera's height band so its ends stay within render distance.
+		double bottom = Math.max(city.y(), cam.y - 64);
+		double top = Math.max(bottom + 1, Math.min(320, cam.y + 64));
+		Gizmos.line(new Vec3(cx, bottom, cz), new Vec3(cx, top, cz), color, 3.0f).setAlwaysOnTop();
 		Gizmos.cuboid(new AABB(city.minX(), city.y(), city.minZ(), city.maxX() + 1, city.maxY() + 1, city.maxZ() + 1), GizmoStyle.stroke(color, 2.0f));
 		Vec3 labelPos = new Vec3(cx, city.maxY() + 6, cz);
 		Gizmos.billboardText(text(s, city, distance), labelPos, label(color, labelPos.distanceTo(cam))).setAlwaysOnTop();

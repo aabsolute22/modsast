@@ -162,6 +162,11 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			connection.waitForChunksRender(MINUTE);
 			context.waitTicks(100);
 			context.takeScreenshot("ecf_near_city");
+			log("render distance " + context.computeOnClient(mc -> mc.options.getEffectiveRenderDistance()) + " chunks");
+			teleportFacing(server, next.x() + 30, next.maxY() + 15, next.z() + 30, next.x(), next.y() + 20, next.z());
+			connection.waitForChunksRender(MINUTE);
+			context.waitTicks(60);
+			context.takeScreenshot("ecf_close_city");
 
 			// Far markers: look across the End from high up between cities.
 			teleportFacing(server, cities.get(0).x(), 160, cities.get(0).z(), cities.get(5).x(), 80, cities.get(5).z());
