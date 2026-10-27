@@ -1,0 +1,15 @@
+{
+	"schemaVersion": 1,
+	"id": "seedcracker-gametest",
+	"version": "1.0.0",
+	"name": "Seed Cracker client game test",
+	"environment": "*",
+	"entrypoints": {
+		"fabric-client-gametest": [
+			"io.github.aabsolute22.seedcracker.gametest.SeedCrackerGameTest"
+		]
+	},
+	"depends": {
+		"seedcracker": "*"
+	}
+}

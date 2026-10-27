@@ -26,3 +26,34 @@ jobs:
         with:
           name: seedcracker
           path: seedcracker/build/libs/
+
+  client-gametest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+      - name: install graphics stack
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers xvfb imagemagick
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: run client game test
+        run: xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew -p seedcracker runClientGameTest --stacktrace
+      - name: print game test log
+        if: always()
+        run: grep -h "SC-GAMETEST\|Seed Cracker\|seedcracker" -r seedcracker/build/run/clientGameTest/logs/latest.log 2>/dev/null | tail -300 || true
+      - name: print screenshots
+        if: always()
+        run: |
+          for f in $(find seedcracker/build/run -name '*sc_*.png' | sort); do
+            convert "$f" -resize 1000x -quality 75 /tmp/shot.jpg || cp "$f" /tmp/shot.jpg
+            echo "=== SCREENSHOT $(basename "$f") ==="
+            base64 -w0 /tmp/shot.jpg
+            echo
+            echo "=== END ==="
+          done
