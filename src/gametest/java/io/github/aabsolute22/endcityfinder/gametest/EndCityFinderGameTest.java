@@ -126,7 +126,7 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			check(session().worlds().size() == 1 && session().worlds().get(0).seed() == (SEED & ((1L << 48) - 1)), "found the real structure seed");
 
 			// 4. Predictions match the ground truth around the player.
-			await(context, "predictions", mc -> !session().predicted().isEmpty(), 2 * MINUTE);
+			await(context, "predictions", mc -> session().predictionsCurrent(), 2 * MINUTE);
 			double px = context.computeOnClient(mc -> mc.player.getX());
 			double pz = context.computeOnClient(mc -> mc.player.getZ());
 			Set<Long> predicted = new HashSet<>();

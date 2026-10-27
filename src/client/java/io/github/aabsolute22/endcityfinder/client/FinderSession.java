@@ -109,12 +109,9 @@ public final class FinderSession {
 	private int[] candidateKeys;
 	private Set<Integer> candidateCities;
 
-	private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
-		Thread t = new Thread(r, "endcityfinder-solver");
-		t.setDaemon(true);
-		t.setPriority(Thread.MIN_PRIORITY);
-		return t;
-	});
+	private final ExecutorService worker = daemonExecutor("endcityfinder-solver");
+	/** Separate from the solver so a long prediction never delays solving, and vice versa. */
+	private final ExecutorService predictor = daemonExecutor("endcityfinder-predictor");
 	private final AtomicBoolean solveQueued = new AtomicBoolean();
 	private final AtomicBoolean predictQueued = new AtomicBoolean();
 	private volatile SeedCracker activeCracker;
@@ -122,10 +119,21 @@ public final class FinderSession {
 	private volatile String detail = "";
 	private volatile List<EndWorld> worlds = List.of();
 	private volatile List<EndCity> predicted = List.of();
+	/** The worlds {@link #predicted} was computed for; stale results are dropped. */
+	private volatile List<EndWorld> predictedFor = List.of();
 	private volatile double predictedAtX = Double.NaN;
 	private volatile double predictedAtZ = Double.NaN;
 	private boolean dirty;
 	private long lastSave;
+
+	private static ExecutorService daemonExecutor(String name) {
+		return Executors.newSingleThreadExecutor(r -> {
+			Thread t = new Thread(r, name);
+			t.setDaemon(true);
+			t.setPriority(Thread.MIN_PRIORITY);
+			return t;
+		});
+	}
 
 	private FinderSession(String key, Path file) {
 		this.key = key;
@@ -224,6 +232,7 @@ public final class FinderSession {
 			cracker.cancel();
 		}
 		worker.shutdownNow();
+		predictor.shutdownNow();
 		save();
 	}
 
@@ -519,6 +528,7 @@ public final class FinderSession {
 	private void clearWorlds() {
 		worlds = List.of();
 		predicted = List.of();
+		predictedFor = List.of();
 	}
 
 	private void publish(List<Long> seeds, int[] keys, Set<Integer> cityIds) {
@@ -552,6 +562,11 @@ public final class FinderSession {
 		return predicted;
 	}
 
+	/** Whether {@link #predicted()} belongs to the current solver result. */
+	public boolean predictionsCurrent() {
+		return !worlds.isEmpty() && predictedFor == worlds;
+	}
+
 	/** Recomputes predictions in the background when the player moved far enough from the last center. */
 	public void updatePrediction(double x, double z, Settings settings) {
 		if (worlds.isEmpty()) {
@@ -566,7 +581,7 @@ public final class FinderSession {
 		List<EndWorld> ws = worlds;
 		int radius = settings.radius;
 		try {
-			worker.submit(() -> {
+			predictor.submit(() -> {
 				predictQueued.set(false);
 				try {
 					predict(ws, (int) x, (int) z, radius);
@@ -580,28 +595,33 @@ public final class FinderSession {
 	}
 
 	private void predict(List<EndWorld> ws, int x, int z, int radius) {
+		List<EndCity> list;
 		if (ws.size() == 1) {
-			List<EndCity> list = ws.get(0).citiesNear(x, z, radius);
-			list.sort(Comparator.comparingDouble(c -> Math.hypot(c.x() - x, c.z() - z)));
-			predicted = List.copyOf(list);
+			list = ws.get(0).citiesNear(x, z, radius);
+		} else if (ws.size() <= 8) {
+			// A few candidate seeds: keep only the cities all of them agree on.
+			int r = Math.min(radius, 3000);
+			Map<Long, EndCity> common = new HashMap<>();
+			for (EndCity c : ws.get(0).citiesNear(x, z, r)) {
+				common.put(c.key(), c);
+			}
+			for (int i = 1; i < ws.size() && !common.isEmpty(); i++) {
+				Set<Long> keys = new HashSet<>();
+				for (EndCity c : ws.get(i).citiesNear(x, z, r)) {
+					keys.add(c.key());
+				}
+				common.keySet().retainAll(keys);
+			}
+			list = new ArrayList<>(common.values());
+		} else {
+			list = new ArrayList<>();
+		}
+		if (ws != worlds) {
 			return;
 		}
-		// Several candidate seeds: keep only cities all of them agree on.
-		int r = Math.min(radius, 3000);
-		Map<Long, EndCity> common = new HashMap<>();
-		for (EndCity c : ws.get(0).citiesNear(x, z, r)) {
-			common.put(c.key(), c);
-		}
-		for (int i = 1; i < ws.size() && !common.isEmpty(); i++) {
-			Set<Long> keys = new HashSet<>();
-			for (EndCity c : ws.get(i).citiesNear(x, z, r)) {
-				keys.add(c.key());
-			}
-			common.keySet().retainAll(keys);
-		}
-		List<EndCity> list = new ArrayList<>(common.values());
 		list.sort(Comparator.comparingDouble(c -> Math.hypot(c.x() - x, c.z() - z)));
 		predicted = List.copyOf(list);
+		predictedFor = ws;
 	}
 
 	/** The city the HUD and arrow point to: the chosen target, else the nearest unvisited one. */
