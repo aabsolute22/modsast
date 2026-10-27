@@ -86,9 +86,11 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 		server.runCommand(String.format("execute in %s run tp Player0 %.1f %.1f %.1f", dimName(dim), x, y, z));
 	}
 
-	private static void teleportFacing(TestDedicatedServerContext server, TestDedicatedServerConnection connection, SeedWorld.Dim dim, double x, double y,
-			double z, double fx, double fy, double fz) {
+	private static void teleportFacing(ClientGameTestContext context, TestDedicatedServerContext server, TestDedicatedServerConnection connection,
+			SeedWorld.Dim dim, double x, double y, double z, double fx, double fy, double fz) {
 		teleport(server, dim, x, y, z);
+		// The glass can only go into a loaded chunk: wait until the client is there and has the chunks.
+		context.waitFor(mc -> mc.player != null && Math.abs(mc.player.getX() - x) < 2 && Math.abs(mc.player.getZ() - z) < 2, MINUTE);
 		connection.waitForChunksDownload(4 * MINUTE);
 		server.runCommand(String.format("execute in %s run setblock %d %d %d minecraft:glass", dimName(dim), (int) Math.floor(x), (int) Math.floor(y) - 1,
 				(int) Math.floor(z)));
@@ -233,24 +235,24 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			double len = Math.hypot(dx, dz);
 			double sx = village.x() - dx / len * 90;
 			double sz = village.z() - dz / len * 90;
-			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y(), village.z());
+			teleportFacing(context, server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y(), village.z());
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
 			context.takeScreenshot("sc_line_near");
 			// From the side the arc shows its shape: look past it, half way along and off to the left.
 			double mx = (sx + village.x()) / 2 - dz / len * 45;
 			double mz = (sz + village.z()) / 2 + dx / len * 45;
-			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, mx, village.y() + 12, mz);
+			teleportFacing(context, server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, mx, village.y() + 12, mz);
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(40);
 			context.takeScreenshot("sc_line_side");
 			// Third person shows the whole arc leaving the player.
-			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y() + 15, village.z());
+			teleportFacing(context, server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y() + 15, village.z());
 			context.runOnClient(mc -> mc.options.setCameraType(CameraType.THIRD_PERSON_BACK));
 			context.waitTicks(40);
 			context.takeScreenshot("sc_line_third");
 			context.runOnClient(mc -> mc.options.setCameraType(CameraType.FIRST_PERSON));
-			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, 0.5, 140, 0.5, village.x(), village.y() + 30, village.z());
+			teleportFacing(context, server, connection, SeedWorld.Dim.OVERWORLD, 0.5, 140, 0.5, village.x(), village.y() + 30, village.z());
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
 			context.takeScreenshot("sc_line_far");
