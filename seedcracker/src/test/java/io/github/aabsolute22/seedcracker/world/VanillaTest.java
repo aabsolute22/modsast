@@ -392,7 +392,8 @@ class VanillaTest {
 								continue;
 							}
 							List<StructurePiece> pieces = start.get().getPieces();
-							StructurePiece piece = pieces.get(0);
+							// An igloo's basement pieces come first; the top is added last.
+							StructurePiece piece = kind == StructureKind.IGLOO ? pieces.get(pieces.size() - 1) : pieces.get(0);
 							if (kind == StructureKind.PILLAGER_OUTPOST) {
 								piece = null;
 								for (StructurePiece q : pieces) {

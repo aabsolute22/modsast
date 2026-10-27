@@ -233,6 +233,8 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			double px = context.computeOnClient(mc -> mc.player.getX());
 			double pz = context.computeOnClient(mc -> mc.player.getZ());
 			teleport(server, SeedWorld.Dim.OVERWORLD, 0.5, 120, 0.5);
+			context.waitFor(mc -> mc.player != null && mc.level != null && SeedWorld.Dim.of(mc.level.dimension()) == SeedWorld.Dim.OVERWORLD
+					&& Math.abs(mc.player.getX() - 0.5) < 2 && Math.abs(mc.player.getZ() - 0.5) < 2, MINUTE);
 			connection.waitForChunksDownload(4 * MINUTE);
 			context.waitFor(mc -> SeedCrackerClient.locator().structures(SeedWorld.Dim.OVERWORLD, StructureKind.VILLAGE, mc.player.getX(), mc.player.getZ(),
 					SeedCrackerClient.settings().radius) != null, MINUTE);
