@@ -198,6 +198,7 @@ public class SeedCrackerClient implements ClientModInitializer {
 		}
 		if (ticks % 20 == 0) {
 			markVisited(mc, s);
+			refineTarget(s);
 		}
 		Session.Phase phase = s.phase();
 		if (phase != lastPhase) {
@@ -208,6 +209,33 @@ public class SeedCrackerClient implements ClientModInitializer {
 		}
 		if (ticks % 100 == 0) {
 			s.saveIfDirty();
+		}
+	}
+
+	/** A stronghold target starts at its ring position; once its pieces are built it moves to the portal room. */
+	private static void refineTarget(Session s) {
+		Session.Target t = s.target();
+		SeedWorld.Dim dim = currentDim();
+		if (t == null || t.refined || t.chunkX == null || dim == null || !Targets.dimId(dim).equals(t.dim) || s.seed() == null) {
+			return;
+		}
+		StructureKind kind = StructureKind.byId(t.kind);
+		if (kind != StructureKind.STRONGHOLD) {
+			return;
+		}
+		var found = LOCATOR.structures(dim, kind, t.x, t.z, 256);
+		if (found == null) {
+			return;
+		}
+		for (SeedWorld.Found f : found) {
+			if (f.chunkX() == t.chunkX && f.chunkZ() == t.chunkZ) {
+				SeedWorld.Found d = LOCATOR.details(dim, f);
+				if (d.box() != null) {
+					Session.Target refined = Targets.of(d, dim);
+					refined.label = SeedCrackerClient.russian() ? "Портал в энд" : "End portal";
+					s.setTarget(refined);
+				}
+			}
 		}
 	}
 

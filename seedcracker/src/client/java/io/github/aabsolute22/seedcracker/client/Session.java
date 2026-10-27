@@ -63,6 +63,10 @@ public final class Session {
 
 	public static final class Target {
 		public String kind;
+		/** Start chunk when the target is a structure, so its details can refine the point later. */
+		public Integer chunkX;
+		public Integer chunkZ;
+		public boolean refined;
 		public String dim;
 		public int x;
 		public int y;

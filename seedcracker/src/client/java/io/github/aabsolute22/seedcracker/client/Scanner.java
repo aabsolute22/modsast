@@ -166,6 +166,7 @@ public final class Scanner {
 		LevelChunkSection[] sections = chunk.getSections();
 		int minSection = chunk.getMinY() >> 4;
 		Map<String, Integer> counts = new HashMap<>();
+		Map<String, Integer> anchorsSeen = new HashMap<>();
 		int pMinX = Integer.MAX_VALUE;
 		int pMaxX = Integer.MIN_VALUE;
 		int pMinZ = Integer.MAX_VALUE;
@@ -189,7 +190,11 @@ public final class Scanner {
 						int wy = baseY + y;
 						int wz = cz * 16 + z;
 						if (anchorCanons.contains(c)) {
-							hits.add(new Hit(wx, wy, wz, c));
+							// One anchor of the right start is enough; a few spread-out ones keep villages full of planks cheap.
+							int seen = anchorsSeen.merge(c, 1, Integer::sum);
+							if (seen <= 4 || seen % 24 == 0 && seen <= 240) {
+								hits.add(new Hit(wx, wy, wz, c));
+							}
 						}
 						switch (c) {
 							case "blue_terracotta" -> {
@@ -275,7 +280,10 @@ public final class Scanner {
 		boolean overworld = dim == SeedWorld.Dim.OVERWORLD;
 		for (Hit h : todo) {
 			List<TemplateMatcher.Match> matches = new ArrayList<>();
-			for (TemplateMatcher.Match m : matcher.fromAnchor(h.x, h.y, h.z, h.canon, source)) {
+			Set<String> around = biomesAround(level, h.x, h.y, h.z);
+			java.util.function.Predicate<StartTemplates.Spec> filter = spec -> spec.kind().overworld == overworld
+					&& (spec.biomes().isEmpty() || around.isEmpty() || around.stream().anyMatch(spec.biomes()::contains));
+			for (TemplateMatcher.Match m : matcher.fromAnchor(h.x, h.y, h.z, h.canon, source, filter)) {
 				if (m.kind().overworld == overworld) {
 					matches.add(m);
 				}
@@ -293,6 +301,27 @@ public final class Scanner {
 			retries.remove(h);
 			report(level, session, solver, matches);
 		}
+	}
+
+	/** Biomes at and around a block, at its height and at the surface, as the server sent them. */
+	private Set<String> biomesAround(ClientLevel level, int x, int y, int z) {
+		Set<String> out = new HashSet<>();
+		for (int[] d : new int[][] {{0, 0}, {24, 0}, {-24, 0}, {0, 24}, {0, -24}}) {
+			int bx = x + d[0];
+			int bz = z + d[1];
+			String b = biomeAt(level, bx, y, bz);
+			if (b != null) {
+				out.add(b);
+			}
+			if (dim == SeedWorld.Dim.OVERWORLD && level.hasChunk(bx >> 4, bz >> 4)) {
+				int top = level.getHeight(Heightmap.Types.WORLD_SURFACE, bx, bz);
+				String s = biomeAt(level, bx, top, bz);
+				if (s != null) {
+					out.add(s);
+				}
+			}
+		}
+		return out;
 	}
 
 	private static boolean nearUnloaded(ClientLevel level, int x, int z) {
@@ -316,7 +345,8 @@ public final class Scanner {
 				continue;
 			}
 			long key = Packed.pack(m.chunkX(), m.chunkZ());
-			int rot = m.variant().spec().rotationCounts() && m.variant().mirror() == net.minecraft.world.level.block.Mirror.NONE ? m.variant().rotation().ordinal() : -1;
+			int rot = m.variant().spec().rotationCounts() && m.variant().mirror() == net.minecraft.world.level.block.Mirror.NONE
+					? m.variant().startRotation().ordinal() : -1;
 			rotation.merge(key, rot, (a, b) -> a.equals(b) ? a : -1);
 			score.merge(key, m.score(), Math::max);
 		}

@@ -40,7 +40,13 @@ public final class StartTemplates {
 		/** Placed at origin + offset, rotated around a fixed pivot (igloo, shipwreck, ocean ruins). */
 		PIVOT,
 		/** Placed at the origin, rotated around the template centre and optionally mirrored front-back (ruined portals). */
-		CENTER_MIRROR
+		CENTER_MIRROR,
+		/** A child of an invisible start piece (outpost towers): fixed offsets per start rotation, from the jigsaw joint. */
+		CHILD
+	}
+
+	/** Where a child piece lands when the start piece has rotation {@code startRotation}. */
+	public record ChildPlacement(Rotation startRotation, Rotation rotation, BlockPos offset) {
 	}
 
 	/** One template block, in template coordinates. */
@@ -48,7 +54,8 @@ public final class StartTemplates {
 	}
 
 	public record Spec(StructureKind kind, String structure, String template, Rule rule, BlockPos pivot, BlockPos offset, Vec3i size,
-			List<TemplateBlock> signature, String anchor, double threshold, boolean rotationCounts) {
+			List<TemplateBlock> signature, String anchor, double threshold, boolean rotationCounts, java.util.Set<String> biomes,
+			List<ChildPlacement> placements) {
 		public List<Mirror> mirrors() {
 			return rule == Rule.CENTER_MIRROR ? List.of(Mirror.NONE, Mirror.FRONT_BACK) : List.of(Mirror.NONE);
 		}
@@ -73,7 +80,28 @@ public final class StartTemplates {
 			return new BlockPos(t.getX() + local.getX(), local.getY(), t.getZ() + local.getZ());
 		}
 
+		/** Every way this spec can sit relative to its start chunk. */
+		public List<Variant> variants() {
+			List<Variant> out = new ArrayList<>();
+			if (rule == Rule.CHILD) {
+				for (ChildPlacement p : placements) {
+					out.add(variant(p.rotation(), Mirror.NONE, p.offset(), p.startRotation()));
+				}
+				return out;
+			}
+			for (Rotation r : Rotation.values()) {
+				for (Mirror m : mirrors()) {
+					out.add(variant(r, m, null, r));
+				}
+			}
+			return out;
+		}
+
 		public Variant variant(Rotation rotation, Mirror mirror) {
+			return variant(rotation, mirror, null, rotation);
+		}
+
+		private Variant variant(Rotation rotation, Mirror mirror, BlockPos childOffset, Rotation startRotation) {
 			int n = signature.size();
 			int[] dx = new int[n];
 			int[] dy = new int[n];
@@ -82,7 +110,8 @@ public final class StartTemplates {
 			List<Integer> anchors = new ArrayList<>();
 			for (int i = 0; i < n; i++) {
 				TemplateBlock b = signature.get(i);
-				BlockPos p = place(b, rotation, mirror);
+				BlockPos p = childOffset == null ? place(b, rotation, mirror)
+						: childOffset.offset(StructureTemplate.transform(new BlockPos(b.x, b.y, b.z), Mirror.NONE, rotation, BlockPos.ZERO));
 				dx[i] = p.getX();
 				dy[i] = p.getY();
 				dz[i] = p.getZ();
@@ -91,21 +120,34 @@ public final class StartTemplates {
 					anchors.add(i);
 				}
 			}
-			return new Variant(this, rotation, mirror, dx, dy, dz, canon, anchors.stream().mapToInt(Integer::intValue).toArray());
+			return new Variant(this, rotation, mirror, startRotation, dx, dy, dz, canon, anchors.stream().mapToInt(Integer::intValue).toArray());
 		}
 	}
 
 	/** A spec under one rotation and mirror, with block offsets ready for matching. */
-	public record Variant(Spec spec, Rotation rotation, Mirror mirror, int[] dx, int[] dy, int[] dz, String[] canon, int[] anchors) {
+	public record Variant(Spec spec, Rotation rotation, Mirror mirror, Rotation startRotation, int[] dx, int[] dy, int[] dz, String[] canon,
+			int[] anchors) {
 	}
 
 	private static final int MAX_SIGNATURE = 360;
 
 	private final List<Spec> specs = new ArrayList<>();
+	private final Map<String, java.util.Set<String>> biomesByStructure = new HashMap<>();
 	private final Map<String, List<Variant>> byAnchor = new HashMap<>();
 
 	public StartTemplates(Worldgen worldgen) {
 		var structures = worldgen.registries().lookupOrThrow(Registries.STRUCTURE);
+		for (StructureKind kind : StructureKind.values()) {
+			for (String id : kind.structures) {
+				structures.getOptional(Identifier.withDefaultNamespace(id)).ifPresent(st -> {
+					java.util.Set<String> ids = new java.util.HashSet<>();
+					for (var holder : st.biomes()) {
+						holder.unwrapKey().ifPresent(k -> ids.add(k.identifier().getPath()));
+					}
+					biomesByStructure.put(id, ids);
+				});
+			}
+		}
 		for (StructureKind kind : List.of(StructureKind.VILLAGE, StructureKind.ANCIENT_CITY, StructureKind.TRAIL_RUINS, StructureKind.TRIAL_CHAMBERS,
 				StructureKind.BASTION)) {
 			for (String id : kind.structures) {
@@ -128,11 +170,10 @@ public final class StartTemplates {
 			addPortal(worldgen, StructureKind.RUINED_PORTAL, t.getPath());
 			addPortal(worldgen, StructureKind.RUINED_PORTAL_NETHER, t.getPath());
 		}
+		addOutpostChildren(worldgen);
 		for (Spec spec : specs) {
-			for (Rotation r : Rotation.values()) {
-				for (Mirror m : spec.mirrors()) {
-					byAnchor.computeIfAbsent(spec.anchor, k -> new ArrayList<>()).add(spec.variant(r, m));
-				}
+			for (Variant v : spec.variants()) {
+				byAnchor.computeIfAbsent(spec.anchor, k -> new ArrayList<>()).add(v);
 			}
 		}
 	}
@@ -232,8 +273,62 @@ public final class StartTemplates {
 		add(kind, structureId, path, Rule.CENTER_MIRROR, pivot, BlockPos.ZERO, template, "obsidian", 0.8);
 	}
 
+	/**
+	 * Outposts start with an empty base plate at the chunk origin; the tower hangs off its jigsaw. For every plate
+	 * rotation and jigsaw, the child that can attach lands at a fixed offset with a fixed rotation.
+	 */
+	private void addOutpostChildren(Worldgen worldgen) {
+		var structures = worldgen.registries().lookupOrThrow(Registries.STRUCTURE);
+		var pools = worldgen.registries().lookupOrThrow(Registries.TEMPLATE_POOL);
+		Optional<Structure> s = structures.getOptional(Identifier.withDefaultNamespace("pillager_outpost"));
+		if (s.isEmpty() || !(s.get() instanceof JigsawStructure jigsaw)) {
+			return;
+		}
+		Map<String, List<ChildPlacement>> byTemplate = new HashMap<>();
+		for (Pair<StructurePoolElement, Integer> plateEntry : jigsaw.getStartPool().value().getTemplates()) {
+			if (!(plateEntry.getFirst() instanceof SinglePoolElement plate)) {
+				continue;
+			}
+			StructureTemplate plateTemplate = worldgen.templates().getOrCreate(plate.getTemplateLocation());
+			for (Rotation startRotation : Rotation.values()) {
+				for (StructureTemplate.JigsawBlockInfo parent : plateTemplate.getJigsaws(BlockPos.ZERO, startRotation)) {
+					var pool = pools.get(parent.pool());
+					if (pool.isEmpty()) {
+						continue;
+					}
+					BlockPos target = parent.info().pos().relative(net.minecraft.world.level.block.JigsawBlock.getFrontFacing(parent.info().state()));
+					for (Pair<StructurePoolElement, Integer> childEntry : pool.get().value().getTemplates()) {
+						if (!(childEntry.getFirst() instanceof SinglePoolElement child)) {
+							continue;
+						}
+						StructureTemplate childTemplate = worldgen.templates().getOrCreate(child.getTemplateLocation());
+						for (Rotation rotation : Rotation.values()) {
+							for (StructureTemplate.JigsawBlockInfo joint : childTemplate.getJigsaws(BlockPos.ZERO, rotation)) {
+								if (net.minecraft.world.level.block.JigsawBlock.canAttach(parent, joint)) {
+									BlockPos offset = target.subtract(joint.info().pos());
+									byTemplate.computeIfAbsent(child.getTemplateLocation().getPath(), k -> new ArrayList<>())
+											.add(new ChildPlacement(startRotation, rotation, offset));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		for (Map.Entry<String, List<ChildPlacement>> e : byTemplate.entrySet()) {
+			StructureTemplate template = worldgen.templates().getOrCreate(Identifier.withDefaultNamespace(e.getKey()));
+			add(StructureKind.PILLAGER_OUTPOST, "pillager_outpost", e.getKey(), Rule.CHILD, BlockPos.ZERO, BlockPos.ZERO, template, null, 0.75,
+					List.copyOf(e.getValue()));
+		}
+	}
+
 	private void add(StructureKind kind, String structureId, String path, Rule rule, BlockPos pivot, BlockPos offset, StructureTemplate template,
 			String forcedAnchor, double threshold) {
+		add(kind, structureId, path, rule, pivot, offset, template, forcedAnchor, threshold, List.of());
+	}
+
+	private void add(StructureKind kind, String structureId, String path, Rule rule, BlockPos pivot, BlockPos offset, StructureTemplate template,
+			String forcedAnchor, double threshold, List<ChildPlacement> placements) {
 		List<TemplateBlock> all = new ArrayList<>();
 		Map<String, Integer> counts = new HashMap<>();
 		for (StructureTemplate.StructureBlockInfo info : blocks(template)) {
@@ -282,7 +377,11 @@ public final class StartTemplates {
 			}
 			signature.add(b);
 		}
+		java.util.Set<String> biomes = new java.util.HashSet<>();
+		for (String id : kind.structures) {
+			biomes.addAll(biomesByStructure.getOrDefault(id, java.util.Set.of()));
+		}
 		specs.add(new Spec(kind, structureId, path, rule, pivot, offset, template.getSize(), List.copyOf(signature), anchor, threshold,
-				StartRules.ROTATION_FIRST.contains(structureId)));
+				StartRules.ROTATION_FIRST.contains(structureId), java.util.Set.copyOf(biomes), placements));
 	}
 }

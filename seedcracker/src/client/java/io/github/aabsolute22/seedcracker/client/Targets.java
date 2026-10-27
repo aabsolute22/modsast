@@ -22,6 +22,9 @@ public final class Targets {
 		t.y = f.y();
 		t.z = f.z();
 		t.label = label(f);
+		t.chunkX = f.chunkX();
+		t.chunkZ = f.chunkZ();
+		t.refined = f.box() != null;
 		return t;
 	}
 

@@ -37,8 +37,16 @@ public final class TemplateMatcher {
 
 	/** Matches anchored on the block {@code canon} at (x, y, z); several variants may agree on one start. */
 	public List<Match> fromAnchor(int x, int y, int z, String canon, BlockSource source) {
+		return fromAnchor(x, y, z, canon, source, spec -> true);
+	}
+
+	/** Same, only trying specs the filter accepts (dimension, biome). */
+	public List<Match> fromAnchor(int x, int y, int z, String canon, BlockSource source, java.util.function.Predicate<StartTemplates.Spec> filter) {
 		List<Match> out = new ArrayList<>();
 		for (StartTemplates.Variant v : templates.variantsAnchoredOn(canon)) {
+			if (!filter.test(v.spec())) {
+				continue;
+			}
 			for (int i : v.anchors()) {
 				int ox = x - v.dx()[i];
 				int oz = z - v.dz()[i];

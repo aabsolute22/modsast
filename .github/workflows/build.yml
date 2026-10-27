@@ -1,9 +1,9 @@
 name: build
 on:
   push:
-    paths-ignore: ['seedcracker/**', '.github/probe/**', '.github/workflows/probe.yml', '.github/workflows/seedcracker.yml']
+    paths-ignore: ['**.md', 'seedcracker/**', '.github/probe/**', '.github/workflows/probe.yml', '.github/workflows/seedcracker.yml']
   pull_request:
-    paths-ignore: ['seedcracker/**', '.github/probe/**', '.github/workflows/probe.yml', '.github/workflows/seedcracker.yml']
+    paths-ignore: ['**.md', 'seedcracker/**', '.github/probe/**', '.github/workflows/probe.yml', '.github/workflows/seedcracker.yml']
 
 jobs:
   build:
