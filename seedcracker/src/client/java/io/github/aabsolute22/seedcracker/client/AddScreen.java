@@ -22,7 +22,7 @@ import io.github.aabsolute22.seedcracker.world.SeedWorld;
  */
 public final class AddScreen extends Screen {
 	private static final int ROW = 14;
-	private static final int LEFT_W = 170;
+	private static final int MAX_LEFT_W = 170;
 	private static final int TOP = 30;
 
 	private static StructureKind lastKind;
@@ -36,6 +36,8 @@ public final class AddScreen extends Screen {
 	private ManualAdd.Plan plan;
 	private int dirty = 1;
 	private String done;
+	private double scroll;
+	private int leftW = MAX_LEFT_W;
 
 	public AddScreen(Screen parent) {
 		this(parent, null);
@@ -59,21 +61,32 @@ public final class AddScreen extends Screen {
 		if (selected == null) {
 			selected = lastKind != null && kinds.contains(lastKind) ? lastKind : kinds.isEmpty() ? null : kinds.get(0);
 		}
-		int rx = 10 + LEFT_W + 14;
+		leftW = Math.min(MAX_LEFT_W, width * 2 / 5);
+		int rx = 10 + leftW + 12;
+		int rw = width - rx - 10;
+		int box = Math.max(40, Math.min(70, (rw - 72) / 2));
 		BlockPos p = playerPos();
-		xBox = coordBox(rx + 14, TOP + 52, xBox != null ? xBox.getValue() : Integer.toString(p.getX()));
-		zBox = coordBox(rx + 104, TOP + 52, zBox != null ? zBox.getValue() : Integer.toString(p.getZ()));
-		addRenderableWidget(Button.builder(Component.literal("Где я стою"), b -> {
+		xBox = coordBox(rx + 10, TOP + 14, box, xBox != null ? xBox.getValue() : Integer.toString(p.getX()));
+		zBox = coordBox(rx + 10 + box + 14, TOP + 14, box, zBox != null ? zBox.getValue() : Integer.toString(p.getZ()));
+		int bx = rx + 10 + 2 * box + 20;
+		addRenderableWidget(Button.builder(Component.literal("Я тут"), b -> {
 			BlockPos q = playerPos();
 			xBox.setValue(Integer.toString(q.getX()));
 			zBox.setValue(Integer.toString(q.getZ()));
-		}).bounds(rx + 184, TOP + 51, 90, 18).build());
-		addButton = addRenderableWidget(Button.builder(Component.literal("Добавить"), b -> add()).bounds(rx, height - 28, 120, 20).build());
-		addRenderableWidget(Button.builder(Component.literal("Назад"), b -> onClose()).bounds(rx + 126, height - 28, 90, 20).build());
+		}).bounds(bx, TOP + 13, Math.max(30, Math.min(60, width - 10 - bx)), 18).build());
+		int bw = Math.min(110, (rw - 6) / 2);
+		addButton = addRenderableWidget(Button.builder(Component.literal("Добавить"), b -> add()).bounds(rx, height - 26, bw, 20).build());
+		addRenderableWidget(Button.builder(Component.literal("Назад"), b -> onClose()).bounds(rx + bw + 6, height - 26, bw, 20).build());
+		// Keep the chosen type in view.
+		int index = kinds.indexOf(selected);
+		int visible = (height - 10 - TOP) / ROW;
+		if (index >= visible) {
+			scroll = (index - visible + 1) * ROW;
+		}
 	}
 
-	private EditBox coordBox(int x, int y, String value) {
-		EditBox box = new EditBox(font, x, y, 76, 16, Component.literal("coord"));
+	private EditBox coordBox(int x, int y, int w, String value) {
+		EditBox box = new EditBox(font, x, y, w, 16, Component.literal("coord"));
 		box.setMaxLength(9);
 		box.setValue(value);
 		box.setResponder(t -> dirty = 1);
@@ -164,36 +177,39 @@ public final class AddScreen extends Screen {
 		}
 
 		int listBottom = height - 10;
-		g.fill(8, TOP - 2, 10 + LEFT_W + 2, listBottom, 0x60000000);
-		int y = TOP;
+		g.fill(8, TOP - 2, 10 + leftW + 2, listBottom, 0x60000000);
+		g.enableScissor(8, TOP - 2, 10 + leftW + 2, listBottom);
+		int y = TOP - (int) scroll;
 		for (StructureKind k : kinds) {
-			if (y + ROW > listBottom) {
-				break;
+			if (y + ROW > TOP - 2 && y < listBottom) {
+				boolean sel = k == selected;
+				boolean hover = mouseX >= 10 && mouseX < 10 + leftW && mouseY >= y && mouseY < y + ROW;
+				if (sel || hover) {
+					g.fill(10, y, 10 + leftW, y + ROW, sel ? 0x50FFFFFF : 0x25FFFFFF);
+				}
+				g.fill(14, y + 4, 20, y + 10, k.color);
+				g.text(font, SeedCrackerClient.name(k), 25, y + 3, sel ? 0xFFFFFFFF : 0xFFD8D8E0, false);
 			}
-			boolean sel = k == selected;
-			boolean hover = mouseX >= 10 && mouseX < 10 + LEFT_W && mouseY >= y && mouseY < y + ROW;
-			if (sel || hover) {
-				g.fill(10, y, 10 + LEFT_W, y + ROW, sel ? 0x50FFFFFF : 0x25FFFFFF);
-			}
-			g.fill(14, y + 4, 20, y + 10, k.color);
-			g.text(font, SeedCrackerClient.name(k), 25, y + 3, sel ? 0xFFFFFFFF : 0xFFD8D8E0, false);
 			y += ROW;
 		}
+		g.disableScissor();
 
-		int rx = 10 + LEFT_W + 14;
+		int rx = 10 + leftW + 12;
 		int rw = width - rx - 10;
+		int box = xBox.getWidth();
 		if (selected != null) {
 			g.text(font, SeedCrackerClient.name(selected), rx, TOP, selected.color, true);
-			int hy = TOP + 14;
-			for (String line : wrap("Как добавить: " + ManualPlacement.hint(selected) + ", потом «Добавить».", rw)) {
-				g.text(font, line, rx, hy, 0xFFC8C8D0, false);
-				hy += 10;
-			}
 		}
-		g.text(font, "X", rx + 4, TOP + 56, 0xFFA0A0A8, false);
-		g.text(font, "Z", rx + 94, TOP + 56, 0xFFA0A0A8, false);
-
-		int py = TOP + 80;
+		g.text(font, "X", rx + 1, TOP + 18, 0xFFA0A0A8, false);
+		g.text(font, "Z", rx + 10 + box + 5, TOP + 18, 0xFFA0A0A8, false);
+		int py = TOP + 38;
+		if (selected != null) {
+			for (String line : wrap("Как: " + ManualPlacement.hint(selected) + ", потом «Добавить».", rw)) {
+				g.text(font, line, rx, py, 0xFFC8C8D0, false);
+				py += 10;
+			}
+			py += 6;
+		}
 		if (plan == null) {
 			g.text(font, dirty > 0 ? "Смотрю…" : "Введи координаты", rx, py, 0xFFA0A0A8, false);
 		} else {
@@ -219,11 +235,14 @@ public final class AddScreen extends Screen {
 			}
 			if (s != null && s.seed() != null) {
 				py += 6;
-				g.text(font, "Сид уже найден, новые находки ему не нужны.", rx, py, 0xFF9A9AA8, false);
+				for (String line : wrap("Сид уже найден, новые находки ему не нужны.", rw)) {
+					g.text(font, line, rx, py, 0xFF9A9AA8, false);
+					py += 10;
+				}
 			}
 		}
 		if (done != null) {
-			g.text(font, done, rx, height - 42, 0xFF9CF29C, false);
+			g.text(font, done, rx, height - 38, 0xFF9CF29C, false);
 		}
 		addButton.active = plan != null && plan.ok() && dirty == 0;
 		super.extractRenderState(g, mouseX, mouseY, delta);
@@ -256,13 +275,23 @@ public final class AddScreen extends Screen {
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		double mx = event.x();
 		double my = event.y();
-		if (mx >= 10 && mx < 10 + LEFT_W && my >= TOP) {
-			int index = (int) ((my - TOP) / ROW);
+		if (mx >= 10 && mx < 10 + leftW && my >= TOP && my < height - 10) {
+			int index = (int) ((my - TOP + scroll) / ROW);
 			if (index >= 0 && index < kinds.size()) {
 				select(kinds.get(index));
 				return true;
 			}
 		}
 		return super.mouseClicked(event, doubleClick);
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (mouseX < 10 + leftW + 6) {
+			double max = Math.max(0, kinds.size() * ROW - (height - 10 - TOP));
+			scroll = Math.max(0, Math.min(max, scroll - scrollY * ROW * 2));
+			return true;
+		}
+		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 	}
 }
