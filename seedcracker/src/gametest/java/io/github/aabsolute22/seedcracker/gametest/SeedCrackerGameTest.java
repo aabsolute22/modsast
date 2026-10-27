@@ -332,12 +332,14 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 					var box = p0.getBoundingBox();
 					int anchors = 0;
 					int matching = 0;
+					java.util.Map<String, Integer> explained = new java.util.TreeMap<>();
 					java.util.Set<String> around = new java.util.TreeSet<>();
 					for (BlockPos q : BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ())) {
 						if (!spec.anchor().equals(src.canonAt(q.getX(), q.getY(), q.getZ()))) {
 							continue;
 						}
 						anchors++;
+						explained.merge(SeedCrackerClient.scanner().explain(mc.level, q.getX(), q.getY(), q.getZ(), spec.anchor()), 1, Integer::sum);
 						around.add(SeedWorld.biomeId(mc.level.getNoiseBiome(q.getX() >> 2, q.getY() >> 2, q.getZ() >> 2)));
 						for (var m : matcher.fromAnchor(q.getX(), q.getY(), q.getZ(), spec.anchor(), src)) {
 							if (m.kind() == v.kind && m.chunkX() == v.found.chunkX() && m.chunkZ() == v.found.chunkZ()) {
@@ -347,7 +349,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 						}
 					}
 					b.append(" | anchors ").append(anchors).append(" matching ").append(matching).append(" biomes there ").append(around)
-							.append(" allowed ").append(around.stream().filter(spec.biomes()::contains).toList());
+							.append(" allowed ").append(around.stream().filter(spec.biomes()::contains).toList()).append(" scanner says ").append(explained);
 				}
 			}
 			return b.toString();

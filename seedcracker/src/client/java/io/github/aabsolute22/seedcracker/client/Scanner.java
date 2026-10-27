@@ -306,6 +306,20 @@ public final class Scanner {
 
 	// ---------------------------------------------------------------- template starts
 
+	/** Diagnostics: what an anchor block at (x, y, z) gives right now, with and without the biome filter. */
+	public String explain(ClientLevel level, int x, int y, int z, String anchor) {
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		TemplateMatcher.BlockSource source = (bx, by, bz) -> canonAt(level, pos, bx, by, bz);
+		boolean overworld = dim == SeedWorld.Dim.OVERWORLD;
+		Set<String> around = biomesAround(level, x, y, z);
+		java.util.function.Predicate<StartTemplates.Spec> filter = spec -> spec.kind().overworld == overworld
+				&& (spec.biomes().isEmpty() || around.isEmpty() || around.stream().anyMatch(spec.biomes()::contains));
+		int filtered = matcher.fromAnchor(x, y, z, anchor, source, filter).size();
+		int all = matcher.fromAnchor(x, y, z, anchor, source).size();
+		return "scanned " + scanned.contains(Packed.pack(x >> 4, z >> 4)) + " near unloaded " + nearUnloaded(level, x, z) + " around " + new java.util.TreeSet<>(around)
+				+ " matches " + filtered + "/" + all + " parked " + parked.size();
+	}
+
 	private void matchHits(ClientLevel level, Session session, Solver solver) {
 		if (hits.isEmpty() || matcher == null) {
 			return;
