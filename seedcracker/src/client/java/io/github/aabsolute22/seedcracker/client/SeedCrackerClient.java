@@ -125,7 +125,7 @@ public class SeedCrackerClient implements ClientModInitializer {
 		lastSampleCount = session.biomeSampleCount();
 		LOCATOR.setSeed(session.seed());
 		if (mc.getSingleplayerServer() != null && session.seed() == null) {
-			long seed = mc.getSingleplayerServer().getWorldData().worldGenOptions().seed();
+			long seed = mc.getSingleplayerServer().overworld().getSeed();
 			session.setSeed(seed, "singleplayer");
 			LOCATOR.setSeed(seed);
 		}
@@ -254,7 +254,7 @@ public class SeedCrackerClient implements ClientModInitializer {
 
 	public static String biomeName(String id) {
 		String key = "biome.minecraft." + id;
-		return I18n.exists(key) ? I18n.get(key) : id;
+		return net.minecraft.locale.Language.getInstance().has(key) ? I18n.get(key) : id;
 	}
 
 	static void onDetected(Session.Obs o) {

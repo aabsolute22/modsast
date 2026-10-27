@@ -46,7 +46,7 @@ public final class HudOverlay {
 		Minecraft mc = Minecraft.getInstance();
 		Session s = SeedCrackerClient.session();
 		Settings settings = SeedCrackerClient.settings();
-		if (s == null || mc.player == null || mc.level == null || !settings.hud || mc.options.hideGui) {
+		if (s == null || mc.player == null || mc.level == null || !settings.hud) {
 			return;
 		}
 		Font font = mc.font;

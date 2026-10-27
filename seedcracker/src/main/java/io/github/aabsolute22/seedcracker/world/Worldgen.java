@@ -39,7 +39,7 @@ public final class Worldgen {
 		RegistryAccess.Frozen forLoading = layers.getAccessForLoading(RegistryLayer.WORLDGEN);
 		List<HolderLookup.RegistryLookup<?>> lookups = TagLoader.buildUpdatedLookups(forLoading, pending);
 		// In game the static tags arrive from the server; without them (tests, title screen) bind the vanilla ones.
-		if (BuiltInRegistries.BLOCK.getTags().findAny().isEmpty()) {
+		if (BuiltInRegistries.BLOCK.get(net.minecraft.tags.BlockTags.FEATURES_CANNOT_REPLACE).isEmpty()) {
 			pending.forEach(Registry.PendingTags::apply);
 		}
 		RegistryAccess.Frozen worldgen = RegistryDataLoader.load(resources, lookups, RegistryDataLoader.WORLDGEN_REGISTRIES, Runnable::run).join();
