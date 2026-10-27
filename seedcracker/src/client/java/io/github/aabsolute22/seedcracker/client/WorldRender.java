@@ -49,6 +49,9 @@ public final class WorldRender {
 			if (settings.markers && s.seed() != null) {
 				drawTracked(mc, s, settings, dim, cam, eye, reach, time, target);
 			}
+			if (settings.markers && s.seed() == null) {
+				drawObservations(s, dim, cam, reach);
+			}
 			if (settings.slimeChunks && s.seed() != null && dim == SeedWorld.Dim.OVERWORLD) {
 				drawSlimeChunks(s.seed(), cam);
 			}
@@ -98,6 +101,33 @@ public final class WorldRender {
 					}
 				}
 			}
+		}
+	}
+
+	/**
+	 * Until the seed is known, what was found so far: the start chunk (or every chunk it may be) outlined at the
+	 * structure's height, and a label. A wrong one is easy to spot this way.
+	 */
+	private static void drawObservations(Session s, SeedWorld.Dim dim, Vec3 cam, double reach) {
+		String dimId = Targets.dimId(dim);
+		for (Session.Obs o : s.observations()) {
+			double d = Math.hypot(o.x - cam.x, o.z - cam.z);
+			if (!dimId.equals(o.dim) || d > reach + 48) {
+				continue;
+			}
+			StructureKind k = o.kindEnum();
+			int color = k != null ? k.color : 0xFFFFFFFF;
+			boolean exact = o.candidates.size() == 1;
+			for (int[] c : o.candidates) {
+				double x0 = c[0] * 16;
+				double z0 = c[1] * 16;
+				Gizmos.cuboid(new AABB(x0, o.y, z0, x0 + 16, o.y + 0.1, z0 + 16), GizmoStyle.stroke(withAlpha(color, exact ? 220 : 120), exact ? 2.5f : 1.5f))
+						.setAlwaysOnTop();
+			}
+			String text = "#" + o.id + " " + (k != null ? SeedCrackerClient.name(k) : o.kind) + (o.auto ? "" : " · вручную")
+					+ (exact ? "" : " · " + o.candidates.size() + " чанка");
+			Vec3 at = new Vec3(o.x + 0.5, o.y + 2.5, o.z + 0.5);
+			Gizmos.billboardText(text, at, label(color, at.distanceTo(cam))).setAlwaysOnTop();
 		}
 	}
 

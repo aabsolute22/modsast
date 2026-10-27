@@ -16,7 +16,9 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerConnection;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 
+import io.github.aabsolute22.seedcracker.client.AddScreen;
 import io.github.aabsolute22.seedcracker.client.LocatorScreen;
+import io.github.aabsolute22.seedcracker.client.ManualAdd;
 import io.github.aabsolute22.seedcracker.client.MapScreen;
 import io.github.aabsolute22.seedcracker.client.SeedCrackerClient;
 import io.github.aabsolute22.seedcracker.client.Session;
@@ -156,6 +158,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 
 			int hits = 0;
 			List<String> missed = new ArrayList<>();
+			List<String> manualWrong = new ArrayList<>();
 			Session.Phase solvedAt = null;
 			for (Visit v : visits) {
 				double y = v.dim == SeedWorld.Dim.NETHER ? Math.max(v.found.y() + 12, 40) : Math.max(v.found.y(), 64) + 30;
@@ -169,6 +172,19 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 				} else {
 					missed.add(v.kind.id());
 					diagnose(context, over, nether, v);
+				}
+				// Adding the same structure by hand from a point inside its start piece must give the same start chunk.
+				SeedWorld vw = v.dim == SeedWorld.Dim.NETHER ? nether : over;
+				BlockPos inside = vw.startAt(vw.set(v.kind.spread), v.found.chunkX(), v.found.chunkZ())
+						.map(st -> st.getPieces().get(0).getBoundingBox().getCenter()).orElse(new BlockPos(v.found.x(), 64, v.found.z()));
+				String manual = context.computeOnClient(mc -> {
+					ManualAdd.Plan plan = ManualAdd.plan(v.kind, inside.getX(), Integer.MIN_VALUE, inside.getZ(), false);
+					boolean right = plan.ok() && plan.candidates().stream().anyMatch(c -> c[0] == v.found.chunkX() && c[1] == v.found.chunkZ());
+					return (right ? "ok " : "WRONG ") + (plan.fromBlocks() ? "blocks " : "position ") + plan.summary();
+				});
+				log("  by hand: " + manual);
+				if (manual.startsWith("WRONG")) {
+					manualWrong.add(v.kind.id());
 				}
 				if (solvedAt == null && session().phase() == Session.Phase.SOLVED) {
 					solvedAt = session().phase();
@@ -207,6 +223,8 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			}
 			check(falsePositives == 0, "every exact detection is a real structure (" + exact.size() + ")");
 			check(missed.isEmpty(), "every visited structure detected (" + hits + "/" + visits.size() + ")");
+			check(manualWrong.isEmpty(), "adding by hand finds the same start chunks, wrong: " + manualWrong);
+			manualMineshaft(context, server, connection, over);
 			boolean solved = waitQuietly(context, mc -> session().phase() == Session.Phase.SOLVED, 6 * MINUTE);
 			log("final phase " + session().phase() + " · " + session().detail() + " · biome samples " + session().biomeSampleCount());
 			check(solved && session().seed() != null && session().seed() == SEED, "cracked the real seed " + SEED);
@@ -356,6 +374,41 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			return b.toString();
 		});
 		log("  diag: " + report);
+	}
+
+	/** A mineshaft is never found automatically: stand in its main room, type {@code /sc add mineshaft}, check the chunk. */
+	private static void manualMineshaft(ClientGameTestContext context, TestDedicatedServerContext server, TestDedicatedServerConnection connection,
+			SeedWorld over) {
+		SeedWorld.Found shaft = null;
+		var rooms = new ArrayList<BlockPos>();
+		for (SeedWorld.Found f : over.near(StructureKind.MINESHAFT, 0, 0, 400)) {
+			var start = over.startAt(over.set(StructureKind.MINESHAFT.spread), f.chunkX(), f.chunkZ());
+			if (start.isPresent() && !start.get().getPieces().isEmpty()) {
+				var box = start.get().getPieces().get(0).getBoundingBox();
+				rooms.add(new BlockPos(box.getCenter().getX(), box.minY() + 1, box.getCenter().getZ()));
+				shaft = f;
+				break;
+			}
+		}
+		if (shaft == null) {
+			log("no mineshaft near spawn, skipping the manual add check");
+			return;
+		}
+		BlockPos room = rooms.get(0);
+		log("mineshaft at chunk " + shaft.chunkX() + " " + shaft.chunkZ() + ", room " + room.toShortString());
+		teleport(server, SeedWorld.Dim.OVERWORLD, room.getX() + 0.5, room.getY(), room.getZ() + 0.5);
+		context.waitFor(mc -> mc.player != null && Math.abs(mc.player.getX() - room.getX()) < 2 && Math.abs(mc.player.getZ() - room.getZ()) < 2, MINUTE);
+		connection.waitForChunksDownload(4 * MINUTE);
+		typeCommand(context, "/sc add mineshaft");
+		context.waitTicks(10);
+		SeedWorld.Found expected = shaft;
+		boolean added = context.computeOnClient(mc -> session().observations().stream().anyMatch(o -> !o.auto && o.kind.equals("mineshaft")
+				&& o.candidates.size() == 1 && o.candidates.get(0)[0] == expected.chunkX() && o.candidates.get(0)[1] == expected.chunkZ()));
+		check(added, "/sc add mineshaft in its room gives its start chunk");
+		context.setScreen(() -> new AddScreen(null, StructureKind.MINESHAFT));
+		context.waitTicks(30);
+		context.takeScreenshot("sc_add");
+		context.setScreen(() -> null);
 	}
 
 	/** Small ocean ruins are a handful of blocks; only big ones are recognised. */

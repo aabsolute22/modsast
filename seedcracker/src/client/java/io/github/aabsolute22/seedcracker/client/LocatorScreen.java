@@ -155,6 +155,10 @@ public final class LocatorScreen extends Screen {
 
 	private void toggleTracked() {
 		Category c = selectedCategory();
+		if (c != null && c.id.equals("found")) {
+			Minecraft.getInstance().setScreenAndShow(new AddScreen(this));
+			return;
+		}
 		if (c == null || c.kind == null) {
 			return;
 		}
@@ -198,6 +202,7 @@ public final class LocatorScreen extends Screen {
 			}
 			if (out.isEmpty()) {
 				out.add(new Row("Пока ничего", "полетай: мод сам замечает деревни, храмы, корабли, порталы, клады, крепости…", 0xFFA8A8B8, null, null, false));
+				out.add(new Row("Или добавь сам", "кнопка «+ Добавить вручную» справа сверху или /sc add", 0xFFA8A8B8, null, null, false));
 			}
 			return out;
 		}
@@ -322,8 +327,11 @@ public final class LocatorScreen extends Screen {
 			g.text(font, c.label, rx + 4, listTop + 2, c.color, true);
 		}
 		boolean trackable = c != null && c.kind != null;
-		trackButton.visible = trackable;
-		if (trackable) {
+		boolean found = c != null && c.id.equals("found");
+		trackButton.visible = trackable || found;
+		if (found) {
+			trackButton.setMessage(Component.literal("+ Добавить вручную"));
+		} else if (trackable) {
 			boolean on = SeedCrackerClient.settings().tracked.contains(c.kind.id());
 			trackButton.setMessage(Component.literal(on ? "◉ Показываю в мире" : "○ Показывать в мире"));
 		}

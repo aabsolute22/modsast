@@ -28,6 +28,7 @@ import io.github.aabsolute22.seedcracker.core.Observation;
 import io.github.aabsolute22.seedcracker.core.Packed;
 import io.github.aabsolute22.seedcracker.core.StructureKind;
 import io.github.aabsolute22.seedcracker.world.Canon;
+import io.github.aabsolute22.seedcracker.world.ManualPlacement;
 import io.github.aabsolute22.seedcracker.world.SeedWorld;
 import io.github.aabsolute22.seedcracker.world.StartTemplates;
 import io.github.aabsolute22.seedcracker.world.TemplateMatcher;
@@ -66,6 +67,7 @@ public final class Scanner {
 	private final Set<String> reported = new HashSet<>();
 	private final Map<Block, String> canon = new IdentityHashMap<>();
 	private Set<String> anchorCanons = Set.of();
+	private ManualPlacement placement;
 	private TemplateMatcher matcher;
 	private SeedWorld.Dim dim;
 	private int ticks;
@@ -91,6 +93,14 @@ public final class Scanner {
 
 	public TemplateMatcher matcher() {
 		return matcher;
+	}
+
+	/** Start chunk geometry for structures added by hand; needs the templates, so null until they are loaded. */
+	public ManualPlacement placement() {
+		if (placement == null && matcher != null) {
+			placement = new ManualPlacement(matcher.templates());
+		}
+		return placement;
 	}
 
 	public int pendingHits() {
@@ -318,6 +328,103 @@ public final class Scanner {
 	}
 
 	// ---------------------------------------------------------------- template starts
+
+	/** A start found around a block the player pointed at: exact chunk, rotation (or -1) and set pick (or -1). */
+	public record Located(int chunkX, int chunkZ, int rotation, int pick, int x, int y, int z, String note) {
+	}
+
+	/**
+	 * Looks for the start of one kind around (x, z) in the loaded chunks, checking every anchor block (no sampling,
+	 * no biome filter): the player said what it is. Nearest first; empty when the blocks do not show it.
+	 */
+	public List<Located> findNear(ClientLevel level, StructureKind kind, int x, int z) {
+		List<Located> out = new ArrayList<>();
+		if (matcher == null) {
+			return out;
+		}
+		int pcx = x >> 4;
+		int pcz = z >> 4;
+		if (kind == StructureKind.FORTRESS) {
+			for (int dx = -4; dx <= 4; dx++) {
+				for (int dz = -4; dz <= 4; dz++) {
+					int y = crossingDeck(level, pcx + dx, pcz + dz);
+					if (y != Integer.MIN_VALUE) {
+						int ox = (pcx + dx) * 16 + 2;
+						int oz = (pcz + dz) * 16 + 2;
+						out.add(new Located(pcx + dx, pcz + dz, -1, basaltNear(level, ox + 9, oz + 9) ? -1 : Observation.PICK_FORTRESS, ox + 9, y, oz + 9,
+								"crossing"));
+					}
+				}
+			}
+		} else if (kind == StructureKind.OCEAN_MONUMENT) {
+			for (int dx = -3; dx <= 3; dx++) {
+				for (int dz = -3; dz <= 3; dz++) {
+					int[] o = monumentStart(pcx + dx, pcz + dz);
+					if (o != null && o.length == 2 && out.stream().noneMatch(l -> l.chunkX() == o[0] >> 4 && l.chunkZ() == o[1] >> 4)) {
+						out.add(new Located(o[0] >> 4, o[1] >> 4, -1, -1, o[0], 50, o[1], "walls"));
+					}
+				}
+			}
+		} else {
+			Set<String> anchors = new HashSet<>();
+			for (StartTemplates.Spec spec : matcher.templates().specs()) {
+				if (spec.kind() == kind) {
+					anchors.add(spec.anchor());
+				}
+			}
+			if (anchors.isEmpty()) {
+				return out;
+			}
+			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+			TemplateMatcher.BlockSource source = (bx, by, bz) -> canonAt(level, pos, bx, by, bz);
+			List<TemplateMatcher.Match> matches = new ArrayList<>();
+			int budget = 6000;
+			for (int dx = -3; dx <= 3 && budget > 0; dx++) {
+				for (int dz = -3; dz <= 3 && budget > 0; dz++) {
+					LevelChunk chunk = level.getChunkSource().getChunk(pcx + dx, pcz + dz, ChunkStatus.FULL, false);
+					if (chunk == null) {
+						continue;
+					}
+					LevelChunkSection[] sections = chunk.getSections();
+					int minSection = chunk.getMinY() >> 4;
+					for (int i = 0; i < sections.length && budget > 0; i++) {
+						LevelChunkSection section = sections[i];
+						if (section == null || section.hasOnlyAir() || !section.maybeHas(st -> anchors.contains(canon(st.getBlock())))) {
+							continue;
+						}
+						for (int by = 0; by < 16; by++) {
+							for (int bz = 0; bz < 16; bz++) {
+								for (int bx = 0; bx < 16; bx++) {
+									String c = canon(section.getBlockState(bx, by, bz).getBlock());
+									if (!anchors.contains(c) || --budget < 0) {
+										continue;
+									}
+									matches.addAll(matcher.fromAnchor(chunk.getPos().x() * 16 + bx, (minSection + i) * 16 + by, chunk.getPos().z() * 16 + bz, c,
+											source, spec -> spec.kind() == kind));
+								}
+							}
+						}
+					}
+				}
+			}
+			Map<Long, Integer> rotation = new HashMap<>();
+			Map<Long, TemplateMatcher.Match> first = new HashMap<>();
+			for (TemplateMatcher.Match m : matches) {
+				long key = Packed.pack(m.chunkX(), m.chunkZ());
+				int rot = m.variant().spec().rotationCounts() && m.variant().mirror() == net.minecraft.world.level.block.Mirror.NONE
+						? m.variant().startRotation().ordinal() : -1;
+				rotation.merge(key, rot, (a, b) -> a.equals(b) ? a : -1);
+				first.putIfAbsent(key, m);
+			}
+			for (Map.Entry<Long, Integer> e : rotation.entrySet()) {
+				TemplateMatcher.Match m = first.get(e.getKey());
+				out.add(new Located(m.chunkX(), m.chunkZ(), e.getValue(), kind == StructureKind.BASTION ? Observation.PICK_BASTION : -1, m.chunkX() * 16 + 8,
+						m.baseY(), m.chunkZ() * 16 + 8, m.variant().spec().template()));
+			}
+		}
+		out.sort((a, b) -> Double.compare(Math.hypot(a.x() - x, a.z() - z), Math.hypot(b.x() - x, b.z() - z)));
+		return out;
+	}
 
 	/** Diagnostics: what an anchor block at (x, y, z) gives right now, with and without the biome filter. */
 	public String explain(ClientLevel level, int x, int y, int z, String anchor) {
@@ -588,6 +695,18 @@ public final class Scanner {
 	 * still loading, 1 when done (found or not).
 	 */
 	private int checkMonument(Session session, int cx, int cz) {
+		int[] o = monumentStart(cx, cz);
+		if (o == null) {
+			return 0;
+		}
+		if (o.length == 2) {
+			addExact(session, StructureKind.OCEAN_MONUMENT, o[0] >> 4, o[1] >> 4, -1, o[0], 50, o[1], "walls");
+		}
+		return 1;
+	}
+
+	/** Centre {x, z} of the monument whose prismarine is around this chunk; empty if there is none, null while loading. */
+	private int[] monumentStart(int cx, int cz) {
 		int minX = Integer.MAX_VALUE;
 		int maxX = Integer.MIN_VALUE;
 		int minZ = Integer.MAX_VALUE;
@@ -596,7 +715,7 @@ public final class Scanner {
 			for (int dz = -4; dz <= 4; dz++) {
 				long key = Packed.pack(cx + dx, cz + dz);
 				if (!scanned.contains(key)) {
-					return 0;
+					return null;
 				}
 				Extent e = prismarine.get(key);
 				if (e != null && e.count > 8) {
@@ -607,13 +726,9 @@ public final class Scanner {
 				}
 			}
 		}
-		SeedCrackerClient.LOG.info("Monument extents around chunk {} {}: x {}..{} z {}..{}", cx, cz, minX, maxX, minZ, maxZ);
 		int ox = monumentOrigin(minX, maxX);
 		int oz = monumentOrigin(minZ, maxZ);
-		if (ox != Integer.MIN_VALUE && oz != Integer.MIN_VALUE) {
-			addExact(session, StructureKind.OCEAN_MONUMENT, ox >> 4, oz >> 4, -1, ox, 50, oz, "walls");
-		}
-		return 1;
+		return ox != Integer.MIN_VALUE && oz != Integer.MIN_VALUE ? new int[] {ox, oz} : new int[0];
 	}
 
 	/** The building spans origin-29..origin+28; a little erosion at one edge is tolerated. */
@@ -640,6 +755,17 @@ public final class Scanner {
 		if (fortressChecked.contains(key)) {
 			return;
 		}
+		int y = crossingDeck(level, cx, cz);
+		if (y != Integer.MIN_VALUE && fortressChecked.add(key)) {
+			int ox = cx * 16 + 2;
+			int oz = cz * 16 + 2;
+			int pick = basaltNear(level, ox + 9, oz + 9) ? -1 : Observation.PICK_FORTRESS;
+			addExact(session, StructureKind.FORTRESS, cx, cz, pick, ox + 9, y, oz + 9, "crossing");
+		}
+	}
+
+	/** Deck height of a fortress start crossing with its corner at (2, 2) of this chunk, or MIN_VALUE. */
+	private int crossingDeck(ClientLevel level, int cx, int cz) {
 		BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
 		int ox = cx * 16 + 2;
 		int oz = cz * 16 + 2;
@@ -651,7 +777,7 @@ public final class Scanner {
 					for (int dy = 0; dy <= 1; dy++) {
 						String c = canonAt(level, p, ox + d[0], y + dy, oz + d[1]);
 						if (c == null) {
-							return;
+							return Integer.MIN_VALUE;
 						}
 						total++;
 						if (c.equals("nether_bricks")) {
@@ -661,14 +787,10 @@ public final class Scanner {
 				}
 			}
 			if (bricks >= total * 0.9 && crossingShape(level, p, ox, y, oz)) {
-				if (!fortressChecked.add(key)) {
-					return;
-				}
-				int pick = basaltNear(level, ox + 9, oz + 9) ? -1 : Observation.PICK_FORTRESS;
-				addExact(session, StructureKind.FORTRESS, cx, cz, pick, ox + 9, y, oz + 9, "crossing");
-				return;
+				return y;
 			}
 		}
+		return Integer.MIN_VALUE;
 	}
 
 	/**

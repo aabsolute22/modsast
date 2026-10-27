@@ -351,6 +351,114 @@ class VanillaTest {
 		stats.forEach((k, v) -> System.out.printf("template %-22s starts %3d matched %3d unambiguous %3d%n", k, v[0], v[1], v[2]));
 	}
 
+	/**
+	 * Structures added by hand: wherever the hint says to stand (the start piece, its corners for kinds where any spot
+	 * inside will do, the portal frame of an ancient city), the real start chunk must be among the candidates.
+	 */
+	@Test
+	void manualPlacementCoversVanillaStarts() {
+		StartTemplates templates = new StartTemplates(worldgen);
+		ManualPlacement manual = new ManualPlacement(templates);
+		java.util.Set<String> towers = new java.util.HashSet<>();
+		for (StartTemplates.Spec sp : templates.specs()) {
+			if (sp.kind() == StructureKind.PILLAGER_OUTPOST) {
+				towers.add(sp.template());
+			}
+		}
+		java.util.Set<StructureKind> landmarks = java.util.EnumSet.of(StructureKind.OCEAN_MONUMENT, StructureKind.ANCIENT_CITY,
+				StructureKind.WOODLAND_MANSION, StructureKind.BURIED_TREASURE);
+		Map<String, int[]> stats = new LinkedHashMap<>();
+		for (long seed : seeds(2, 20)) {
+			for (SeedWorld.Dim dim : SeedWorld.Dim.values()) {
+				SeedWorld w = new SeedWorld(worldgen, seed, dim);
+				for (StructureKind kind : StructureKind.values()) {
+					if (kind.overworld != dim.overworld() || !ManualPlacement.useful(kind) || !w.hasSet(kind.spread)) {
+						continue;
+					}
+					boolean perChunk = kind.spread.spacing() <= 2;
+					int range = perChunk ? 48 : kind == StructureKind.WOODLAND_MANSION ? 2 : 4;
+					for (int rx = -range; rx <= range; rx++) {
+						for (int rz = -range; rz <= range; rz++) {
+							long p = kind.spread.potentialChunk(seed, rx, rz);
+							int cx = Packed.x(p);
+							int cz = Packed.z(p);
+							var stub = w.stubAt(w.set(kind.spread), cx, cz);
+							if (stub.isEmpty() || StructureKind.ofStructure(stub.get().structure().unwrapKey().map(k -> k.identifier().getPath()).orElse(""),
+									dim.overworld()) != kind) {
+								continue;
+							}
+							Optional<StructureStart> start = w.startAt(w.set(kind.spread), cx, cz);
+							if (start.isEmpty() || start.get().getPieces().isEmpty()) {
+								continue;
+							}
+							List<StructurePiece> pieces = start.get().getPieces();
+							StructurePiece piece = pieces.get(0);
+							if (kind == StructureKind.PILLAGER_OUTPOST) {
+								piece = null;
+								for (StructurePiece q : pieces) {
+									if (q instanceof PoolElementStructurePiece pool
+											&& pool.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single
+											&& towers.contains(single.getTemplateLocation().getPath())) {
+										piece = q;
+										break;
+									}
+								}
+								if (piece == null) {
+									continue;
+								}
+							}
+							var box = piece.getBoundingBox();
+							List<int[]> points = new ArrayList<>();
+							if (kind == StructureKind.ANCIENT_CITY) {
+								points.add(frameCentre((PoolElementStructurePiece) piece));
+							} else {
+								points.add(new int[] {box.getCenter().getX(), box.getCenter().getZ()});
+								if (!landmarks.contains(kind)) {
+									points.add(new int[] {box.minX(), box.minZ()});
+									points.add(new int[] {box.maxX(), box.minZ()});
+									points.add(new int[] {box.minX(), box.maxZ()});
+									points.add(new int[] {box.maxX(), box.maxZ()});
+								}
+							}
+							int[] st = stats.computeIfAbsent(kind.id(), k -> new int[3]);
+							st[0]++;
+							for (int[] pt : points) {
+								List<int[]> cands = manual.candidates(kind, pt[0], pt[1]);
+								assertTrue(cands.stream().anyMatch(c -> c[0] == cx && c[1] == cz), kind.id() + " at " + pt[0] + " " + pt[1] + " (offset "
+										+ (pt[0] - cx * 16) + " " + (pt[1] - cz * 16) + " from chunk " + cx + " " + cz + "), candidates " + cands.size());
+								if (pt == points.get(0)) {
+									st[1] += cands.size() == 1 ? 1 : 0;
+									st[2] = Math.max(st[2], cands.size());
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		stats.forEach((k, v) -> System.out.printf("manual %-22s starts %3d exact from centre %3d most candidates %d%n", k, v[0], v[1], v[2]));
+	}
+
+	/** Middle of the reinforced deepslate (the portal frame) of an ancient city's centre piece. */
+	private static int[] frameCentre(PoolElementStructurePiece piece) {
+		var single = (net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement) piece.getElement();
+		var template = worldgen.templates().getOrCreate(single.getTemplateLocation());
+		var settings = new net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings().setRotation(piece.getRotation());
+		long sx = 0;
+		long sz = 0;
+		int n = 0;
+		for (var info : StartTemplates.blocks(template)) {
+			if (info.state().getBlock() == net.minecraft.world.level.block.Blocks.REINFORCED_DEEPSLATE) {
+				BlockPos wp = piece.getPosition().offset(net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.calculateRelativePosition(settings, info.pos()));
+				sx += wp.getX();
+				sz += wp.getZ();
+				n++;
+			}
+		}
+		assertTrue(n > 0, "ancient city centre without reinforced deepslate");
+		return new int[] {(int) Math.floorDiv(sx, n), (int) Math.floorDiv(sz, n)};
+	}
+
 	/** Seed → vanilla structures → observations → cracker → hashed seed → the same seed. */
 	@Test
 	void crackVanillaWorld() {

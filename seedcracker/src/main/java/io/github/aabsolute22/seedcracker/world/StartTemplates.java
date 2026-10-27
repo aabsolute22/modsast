@@ -134,6 +134,8 @@ public final class StartTemplates {
 	private final List<Spec> specs = new ArrayList<>();
 	private final Map<String, java.util.Set<String>> biomesByStructure = new HashMap<>();
 	private final Map<String, List<Variant>> byAnchor = new HashMap<>();
+	/** Horizontal extents {minX, maxX, minZ, maxZ} of every start piece (outposts: tower) from the start chunk origin. */
+	private final Map<StructureKind, List<int[]>> footprints = new java.util.EnumMap<>(StructureKind.class);
 
 	public StartTemplates(Worldgen worldgen) {
 		var structures = worldgen.registries().lookupOrThrow(Registries.STRUCTURE);
@@ -164,6 +166,9 @@ public final class StartTemplates {
 		for (Identifier t : templatesUnder(worldgen, "underwater_ruin/")) {
 			if (t.getPath().contains("big_")) {
 				addPivot(worldgen, StructureKind.OCEAN_RUIN, "ocean_ruin_cold", t.getPath(), BlockPos.ZERO, BlockPos.ZERO, 0.7);
+			} else {
+				// Too small to recognise, but still a place a player can point at.
+				footprint(StructureKind.OCEAN_RUIN, Rule.PIVOT, BlockPos.ZERO, BlockPos.ZERO, worldgen.templates().getOrCreate(t).getSize(), List.of());
 			}
 		}
 		for (Identifier t : templatesUnder(worldgen, "ruined_portal/")) {
@@ -180,6 +185,33 @@ public final class StartTemplates {
 
 	public List<Spec> specs() {
 		return specs;
+	}
+
+	/** Where the start pieces of a kind can lie relative to the start chunk origin, as {minX, maxX, minZ, maxZ}. */
+	public List<int[]> footprints(StructureKind kind) {
+		return footprints.getOrDefault(kind, List.of());
+	}
+
+	/** Records the corners of a template under every placement its rule allows. */
+	private void footprint(StructureKind kind, Rule rule, BlockPos pivot, BlockPos offset, Vec3i size, List<ChildPlacement> placements) {
+		int sx = Math.max(1, size.getX()) - 1;
+		int sz = Math.max(1, size.getZ()) - 1;
+		List<TemplateBlock> corners = List.of(new TemplateBlock(0, 0, 0, "corner"), new TemplateBlock(sx, 0, 0, "corner"),
+				new TemplateBlock(0, 0, sz, "corner"), new TemplateBlock(sx, 0, sz, "corner"));
+		Spec shape = new Spec(kind, "", "", rule, pivot, offset, size, corners, "corner", 1, false, java.util.Set.of(), placements);
+		List<int[]> list = footprints.computeIfAbsent(kind, k -> new ArrayList<>());
+		for (Variant v : shape.variants()) {
+			int[] box = {Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE};
+			for (int i = 0; i < 4; i++) {
+				box[0] = Math.min(box[0], v.dx()[i]);
+				box[1] = Math.max(box[1], v.dx()[i]);
+				box[2] = Math.min(box[2], v.dz()[i]);
+				box[3] = Math.max(box[3], v.dz()[i]);
+			}
+			if (list.stream().noneMatch(b -> java.util.Arrays.equals(b, box))) {
+				list.add(box);
+			}
+		}
 	}
 
 	/** Variants with at least one anchor block of this canonical type. */
@@ -329,6 +361,7 @@ public final class StartTemplates {
 
 	private void add(StructureKind kind, String structureId, String path, Rule rule, BlockPos pivot, BlockPos offset, StructureTemplate template,
 			String forcedAnchor, double threshold, List<ChildPlacement> placements) {
+		footprint(kind, rule, pivot, offset, template.getSize(), placements);
 		List<TemplateBlock> all = new ArrayList<>();
 		Map<String, Integer> counts = new HashMap<>();
 		for (StructureTemplate.StructureBlockInfo info : blocks(template)) {

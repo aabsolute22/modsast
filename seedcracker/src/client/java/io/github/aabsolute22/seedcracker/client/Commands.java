@@ -40,6 +40,18 @@ public final class Commands {
 		return SharedSuggestionProvider.suggest(ids, builder);
 	};
 
+	/** Kinds that say something about the seed, current dimension first. */
+	private static final SuggestionProvider<FabricClientCommandSource> MANUAL_KINDS = (ctx, builder) -> {
+		List<String> ids = new ArrayList<>();
+		SeedWorld.Dim dim = SeedCrackerClient.currentDim();
+		for (StructureKind k : StructureKind.values()) {
+			if (io.github.aabsolute22.seedcracker.world.ManualPlacement.useful(k) && (dim == null || k.overworld == dim.overworld())) {
+				ids.add(k.id());
+			}
+		}
+		return SharedSuggestionProvider.suggest(ids, builder);
+	};
+
 	private static final SuggestionProvider<FabricClientCommandSource> BIOMES = (ctx, builder) -> {
 		List<String> ids = new ArrayList<>();
 		MultiNoiseBiomeSourceParameterList.Preset.OVERWORLD.usedBiomes().forEach(k -> ids.add(k.identifier().getPath()));
@@ -80,13 +92,24 @@ public final class Commands {
 				.then(literal("structures").executes(ctx -> structures(ctx.getSource())))
 				.then(literal("remove").then(argument("id", IntegerArgumentType.integer(1))
 						.executes(ctx -> remove(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id")))))
-				.then(literal("add").then(argument("kind", StringArgumentType.word()).suggests(KINDS)
-						.then(argument("chunkX", IntegerArgumentType.integer()).then(argument("chunkZ", IntegerArgumentType.integer())
-								.executes(ctx -> add(ctx.getSource(), StringArgumentType.getString(ctx, "kind"), IntegerArgumentType.getInteger(ctx, "chunkX"),
-										IntegerArgumentType.getInteger(ctx, "chunkZ"), -1))
-								.then(argument("rotation", IntegerArgumentType.integer(0, 270))
-										.executes(ctx -> add(ctx.getSource(), StringArgumentType.getString(ctx, "kind"), IntegerArgumentType.getInteger(ctx, "chunkX"),
-												IntegerArgumentType.getInteger(ctx, "chunkZ"), IntegerArgumentType.getInteger(ctx, "rotation") / 90)))))))
+				.then(literal("add")
+						.executes(ctx -> {
+							Minecraft mc = ctx.getSource().getClient();
+							mc.execute(() -> mc.execute(() -> mc.setScreenAndShow(new AddScreen(null))));
+							return 1;
+						})
+						.then(argument("kind", StringArgumentType.word()).suggests(MANUAL_KINDS)
+								.executes(ctx -> addHere(ctx.getSource(), StringArgumentType.getString(ctx, "kind")))
+								.then(literal("chunk").then(argument("chunkX", IntegerArgumentType.integer()).then(argument("chunkZ", IntegerArgumentType.integer())
+										.executes(ctx -> addChunk(ctx.getSource(), StringArgumentType.getString(ctx, "kind"), IntegerArgumentType.getInteger(ctx, "chunkX"),
+												IntegerArgumentType.getInteger(ctx, "chunkZ"), -1))
+										.then(argument("rotation", IntegerArgumentType.integer(0, 270))
+												.executes(ctx -> addChunk(ctx.getSource(), StringArgumentType.getString(ctx, "kind"),
+														IntegerArgumentType.getInteger(ctx, "chunkX"), IntegerArgumentType.getInteger(ctx, "chunkZ"),
+														IntegerArgumentType.getInteger(ctx, "rotation") / 90))))))
+								.then(argument("x", IntegerArgumentType.integer()).then(argument("z", IntegerArgumentType.integer())
+										.executes(ctx -> addAt(ctx.getSource(), StringArgumentType.getString(ctx, "kind"), IntegerArgumentType.getInteger(ctx, "x"),
+												IntegerArgumentType.getInteger(ctx, "z")))))))
 				.then(literal("crack").executes(ctx -> {
 					Solver solver = SeedCrackerClient.solver();
 					if (solver != null) {
@@ -179,7 +202,8 @@ public final class Commands {
 			"B поиск структур и биомов · M карта · V линии вкл/выкл",
 			"/sc find <тип> [n] ближайшие · /sc biome <биом> · /sc track <тип> метки в мире",
 			"/sc target <x> <y> <z> | clear · /sc seed [число|clear] · /sc structures · /sc remove <id>",
-			"/sc add <тип> <чанкX> <чанкZ> [0|90|180|270] вручную · /sc crack долгий перебор · /sc cancel",
+			"/sc add экран ручного ввода · /sc add <тип> структура, где ты стоишь · /sc add <тип> <x> <z> по координатам",
+			"/sc add <тип> chunk <чанкX> <чанкZ> [0|90|180|270] по стартовому чанку · /sc crack долгий перебор · /sc cancel",
 			"/sc radius <блоки> · /sc slime · /sc lines · /sc markers · /sc hud · /sc reset confirm"
 		};
 		for (String line : lines) {
@@ -388,25 +412,55 @@ public final class Commands {
 		return 1;
 	}
 
-	private static int add(FabricClientCommandSource source, String id, int chunkX, int chunkZ, int rotation) {
+	/** {@code /sc add <kind>}: the structure the player stands in. */
+	private static int addHere(FabricClientCommandSource source, String id) {
+		StructureKind k = kind(source, id);
+		Minecraft mc = source.getClient();
+		if (k == null || session(source) == null || mc.player == null) {
+			return 0;
+		}
+		BlockPos p = mc.player.blockPosition();
+		return addPlan(source, ManualAdd.plan(k, p.getX(), p.getY(), p.getZ(), true));
+	}
+
+	/** {@code /sc add <kind> <x> <z>}: a structure at block coordinates (from F3, a friend or a treasure map). */
+	private static int addAt(FabricClientCommandSource source, String id, int x, int z) {
+		StructureKind k = kind(source, id);
+		if (k == null || session(source) == null) {
+			return 0;
+		}
+		return addPlan(source, ManualAdd.plan(k, x, Integer.MIN_VALUE, z, false));
+	}
+
+	private static int addPlan(FabricClientCommandSource source, ManualAdd.Plan plan) {
+		if (!plan.ok()) {
+			source.sendError(Component.literal(plan.error()));
+			return 0;
+		}
+		Session.Obs o = ManualAdd.commit(session(source), plan);
+		source.sendFeedback(ManualAdd.feedback(plan, o));
+		return 1;
+	}
+
+	/** {@code /sc add <kind> chunk <x> <z> [rotation]}: the exact start chunk, for those who know it. */
+	private static int addChunk(FabricClientCommandSource source, String id, int chunkX, int chunkZ, int rotation) {
 		Session s = session(source);
 		StructureKind k = kind(source, id);
 		if (s == null || k == null) {
 			return 0;
 		}
-		if (k.spread == null) {
-			source.sendError(Component.literal("Этот тип не помогает вычислить сид"));
+		if (!io.github.aabsolute22.seedcracker.world.ManualPlacement.useful(k)) {
+			source.sendError(Component.literal(SeedCrackerClient.name(k) + " ничего не говорит о сиде"));
+			return 0;
+		}
+		int ox = chunkX - k.spread.region(chunkX) * k.spread.spacing();
+		int oz = chunkZ - k.spread.region(chunkZ) * k.spread.spacing();
+		if (ox >= k.spread.limit() || oz >= k.spread.limit()) {
+			source.sendError(Component.literal("В чанке " + chunkX + " " + chunkZ + " " + SeedCrackerClient.name(k) + " начаться не может"));
 			return 0;
 		}
 		List<int[]> c = new ArrayList<>();
 		c.add(new int[] {chunkX, chunkZ, rotation});
-		Session.Obs o = s.addObservation(k, k.overworld ? "overworld" : "nether", c, -1, false, chunkX * 16 + 8, 64, chunkZ * 16 + 8, "manual");
-		if (o == null) {
-			source.sendFeedback(Component.literal("Уже есть"));
-			return 1;
-		}
-		SeedCrackerClient.solver().request();
-		source.sendFeedback(Component.literal("Добавил #" + o.id + ": " + o.describe()));
-		return 1;
+		return addPlan(source, new ManualAdd.Plan(k, c, -1, false, chunkX * 16 + 8, 64, chunkZ * 16 + 8, "manual chunk", null));
 	}
 }

@@ -115,6 +115,47 @@ class CrackerTest {
 		crackOne(obs, seed, "2 temples + 2 villages + shipwreck");
 	}
 
+	/** A structure as a player would add it by hand standing near a chunk corner: the 2x2 chunks around its start. */
+	static Observation around(Observation exact) {
+		Observation.Candidate c = exact.candidates().get(0);
+		List<Observation.Candidate> list = new ArrayList<>();
+		for (int dx = -1; dx <= 0; dx++) {
+			for (int dz = 0; dz <= 1; dz++) {
+				list.add(new Observation.Candidate(c.chunkX() + dx, c.chunkZ() + dz, -1));
+			}
+		}
+		return new Observation(exact.spread(), list, -1, null, exact.outpost());
+	}
+
+	@Test
+	void ambiguousManualStructuresBranch() {
+		long seed = new Random(13).nextLong();
+		List<Observation> obs = new ArrayList<>();
+		obs.add(observe(seed, Spread.VILLAGES, 0, 0, true));
+		obs.add(observe(seed, Spread.VILLAGES, 1, -1, true));
+		obs.add(around(observe(seed, Spread.DESERT_PYRAMIDS, 1, 0, false)));
+		obs.add(around(observe(seed, Spread.JUNGLE_TEMPLES, -2, 3, false)));
+		obs.add(observe(seed, Spread.SHIPWRECKS, 2, 2, true));
+		StructureSeedCracker whole = new StructureSeedCracker(obs, 4096);
+		List<List<Observation>> plan = Branching.plan(obs, 4096);
+		double branched = Branching.cost(plan, 4096);
+		System.out.printf("ambiguous: whole %.1f s/core, %d branches %.2f s/core%n", whole.estimatedNanos() / 1e9, plan.size(), branched / 1e9);
+		assertTrue(plan.size() > 1, "should branch");
+		assertTrue(branched < whole.estimatedNanos() / 10, "branching should pay");
+		java.util.Set<Long> seeds = new java.util.TreeSet<>();
+		for (List<Observation> branch : plan) {
+			StructureSeedCracker.Result r = new StructureSeedCracker(branch, 4096).run(THREADS);
+			assertFalse(r.overflow());
+			for (long s : r.seeds()) {
+				if (whole.accepts(s)) {
+					seeds.add(s);
+				}
+			}
+		}
+		assertTrue(seeds.contains(seed & LegacyRandom.MASK), "branches missed the real seed");
+		assertTrue(seeds.size() < 50, "too many seeds: " + seeds.size());
+	}
+
 	@Test
 	void netherOnlyWithCongruences() {
 		long seed = new Random(12).nextLong();

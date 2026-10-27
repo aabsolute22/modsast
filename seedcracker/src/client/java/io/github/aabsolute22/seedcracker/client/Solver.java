@@ -8,6 +8,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.github.aabsolute22.seedcracker.core.Branching;
 import io.github.aabsolute22.seedcracker.core.Observation;
 import io.github.aabsolute22.seedcracker.core.SeedHash;
 import io.github.aabsolute22.seedcracker.core.StructureSeedCracker;
@@ -125,32 +126,60 @@ public final class Solver {
 			}
 		}
 		if (!reuse) {
-			StructureSeedCracker c = filter;
-			if (c.expectedFalseSeeds() > MAX_FALSE_SEEDS) {
+			if (filter.expectedFalseSeeds() > MAX_FALSE_SEEDS) {
 				session.setStatus(Session.Phase.COLLECTING, String.format("мало данных: %.0f бит из ~48, ищу ещё структуры", bits));
 				return;
 			}
+			// Structures added by hand may name a few possible chunks; trying each one apart is often much faster.
+			List<StructureSeedCracker> branches = new ArrayList<>();
+			for (List<Observation> b : Branching.plan(obs, MAX_SEEDS)) {
+				branches.add(new StructureSeedCracker(b, MAX_SEEDS));
+			}
+			double nanos = 0;
+			for (StructureSeedCracker c : branches) {
+				nanos += c.estimatedNanos();
+			}
 			int threads = settings.threadCount();
-			double seconds = c.estimatedNanos() / 1e9 / threads;
+			double seconds = nanos / 1e9 / threads;
 			if (seconds > settings.maxCrackMinutes * 60.0 && !allowSlow) {
 				session.setStatus(Session.Phase.SLOW, String.format("перебор займёт ~%s, /sc crack чтобы начать (храм, корабль или клад ускорят)",
 						duration((long) (seconds * 1000))));
 				return;
 			}
-			cracker = c;
 			long start = System.currentTimeMillis();
-			session.setProgress(c::progress, (long) (seconds * 1000));
-			session.setStatus(Session.Phase.CRACKING, String.format("перебор сида структур (%.0f бит)", bits));
-			StructureSeedCracker.Result result = c.run(threads);
-			cracker = null;
-			if (result.cancelled()) {
-				return;
+			int[] done = {0};
+			session.setProgress(() -> {
+				StructureSeedCracker c = cracker;
+				return (done[0] + (c == null ? 0 : c.progress())) / branches.size();
+			}, (long) (seconds * 1000));
+			session.setStatus(Session.Phase.CRACKING, String.format("перебор сида структур (%.0f бит%s)", bits,
+					branches.size() > 1 ? ", " + branches.size() + " вариантов ручных находок" : ""));
+			Set<Long> union = new java.util.TreeSet<>();
+			boolean overflow = false;
+			for (StructureSeedCracker c : branches) {
+				cracker = c;
+				StructureSeedCracker.Result result = c.run(threads);
+				cracker = null;
+				if (result.cancelled()) {
+					return;
+				}
+				done[0]++;
+				for (long seed : result.seeds()) {
+					// A branch only fixed one candidate; the full set of observations has the last word.
+					if (filter.accepts(seed)) {
+						union.add(seed);
+					}
+				}
+				overflow |= result.overflow() || union.size() > MAX_SEEDS;
+				if (overflow) {
+					break;
+				}
 			}
-			SeedCrackerClient.LOG.info("Structure seed search: {} seeds in {} ms (overflow {})", result.seeds().size(),
-					System.currentTimeMillis() - start, result.overflow());
-			seeds = result.seeds();
-			session.setStructureSeeds(seeds, result.overflow());
-			if (result.overflow()) {
+			SeedCrackerClient.LOG.info("Structure seed search: {} seeds in {} ms over {} branches (overflow {})", union.size(),
+					System.currentTimeMillis() - start, branches.size(), overflow);
+			seeds = new ArrayList<>(union);
+			session.setStructureSeeds(seeds, overflow);
+			if (overflow) {
 				session.setStatus(Session.Phase.COLLECTING, "слишком много вариантов, нужна ещё структура");
 				return;
 			}
@@ -159,7 +188,9 @@ public final class Solver {
 					request();
 					return;
 				}
-				session.setStatus(Session.Phase.CONTRADICTION, "ни один сид не подходит, проверь /sc structures");
+				if (session.phase() != Session.Phase.CONTRADICTION) {
+					session.setStatus(Session.Phase.CONTRADICTION, "ни один сид не подходит, проверь /sc structures");
+				}
 				return;
 			}
 		}
@@ -180,7 +211,7 @@ public final class Solver {
 		long deadline = System.currentTimeMillis() + 120_000;
 		List<Integer> suspects = new ArrayList<>();
 		for (int i = 0; i < obs.size(); i++) {
-			if (!all.get(i).auto || System.currentTimeMillis() > deadline) {
+			if (System.currentTimeMillis() > deadline) {
 				continue;
 			}
 			List<Observation> rest = new ArrayList<>(obs);
@@ -203,6 +234,14 @@ public final class Solver {
 			return false;
 		}
 		Session.Obs bad = all.get(suspects.get(0));
+		if (!bad.auto) {
+			// Never drop what the player typed in; say which one does not fit.
+			session.setStatus(Session.Phase.CONTRADICTION, "не сходится ручная находка #" + bad.id + " (" + bad.describe() + "), проверь её или /sc remove " + bad.id);
+			net.minecraft.client.Minecraft.getInstance().execute(() -> SeedCrackerClient.message(net.minecraft.network.chat.Component
+					.literal("[SC] Похоже, ручная находка #" + bad.id + " ошибочная: " + bad.describe() + ". Удалить: /sc remove " + bad.id)
+					.withStyle(net.minecraft.ChatFormatting.YELLOW)));
+			return false;
+		}
 		session.removeObservation(bad.id);
 		SeedCrackerClient.LOG.info("Dropped inconsistent observation #{} {}", bad.id, bad.describe());
 		net.minecraft.client.Minecraft.getInstance().execute(() -> SeedCrackerClient.message(net.minecraft.network.chat.Component
