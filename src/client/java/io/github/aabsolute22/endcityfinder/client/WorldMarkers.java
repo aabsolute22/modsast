@@ -109,7 +109,8 @@ public final class WorldMarkers {
 		int color = color(s, city, target);
 		double cx = city.x() + 0.5;
 		double cz = city.z() + 0.5;
-		Vec3 aim = new Vec3(cx, Math.max(city.maxY(), cam.y), cz);
+		// At eye level, so far cities line up along the horizon instead of drifting off the top of the screen.
+		Vec3 aim = new Vec3(cx, cam.y, cz);
 		Vec3 p = cam.add(aim.subtract(cam).normalize().scale(FAR_MARKER_DISTANCE));
 		Gizmos.line(p.add(0, -4, 0), p.add(0, 4, 0), color, 4.0f).setAlwaysOnTop();
 		if (withLabel) {

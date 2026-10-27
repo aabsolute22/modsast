@@ -22,7 +22,7 @@ public final class Settings {
 	/** Distance below which a city is drawn at its real position with its outline. */
 	public int nearDistance = 192;
 	/** A city counts as visited once the player gets this close to its base. */
-	public int visitDistance = 48;
+	public int visitDistance = 40;
 
 	private static Path file() {
 		return EndCityFinderClient.configDir().resolve("settings.json");
