@@ -42,7 +42,8 @@ public final class WorldScanner {
 	private final LongOpenHashSet scanned = new LongOpenHashSet();
 	private final Long2ObjectOpenHashMap<CityChunk> cityChunks = new Long2ObjectOpenHashMap<>();
 	private final LongOpenHashSet reported = new LongOpenHashSet();
-	private boolean cityChunksChanged;
+	/** Set when city chunks arrive; stays set while some city is still waiting for its neighbours to load. */
+	private boolean detectionPending;
 	private int ticks;
 
 	public void reset() {
@@ -51,6 +52,7 @@ public final class WorldScanner {
 		scanned.clear();
 		cityChunks.clear();
 		reported.clear();
+		detectionPending = false;
 	}
 
 	public void enqueue(int chunkX, int chunkZ) {
@@ -82,8 +84,8 @@ public final class WorldScanner {
 		if (ticks % 20 == 0 && playerX * playerX + playerZ * playerZ < 400 * 400) {
 			scanPillars(level, session);
 		}
-		if (ticks % 20 == 10 && cityChunksChanged) {
-			cityChunksChanged = false;
+		if (ticks % 20 == 10 && detectionPending) {
+			detectionPending = false;
 			detectCities(session, false, 0, 0);
 		}
 	}
@@ -117,7 +119,7 @@ public final class WorldScanner {
 		if (minY != Integer.MAX_VALUE) {
 			if (chunkDistanceSq(cx, cz) > (long) MIN_CITY_CHUNK_DISTANCE * MIN_CITY_CHUNK_DISTANCE) {
 				cityChunks.put(key, new CityChunk(minY, columns.toLongArray()));
-				cityChunksChanged = true;
+				detectionPending = true;
 			}
 			return;
 		}
@@ -261,6 +263,8 @@ public final class WorldScanner {
 					continue;
 				}
 			} else if (!complete) {
+				// Try again once the surrounding chunks have been scanned.
+				detectionPending = true;
 				continue;
 			}
 			long signature = Placement.pack(minX, minZ) ^ ((long) minY << 58);
