@@ -20,6 +20,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -59,6 +60,8 @@ public class EndCityFinderClient implements ClientModInitializer {
 			}
 		});
 		ClientTickEvents.END_CLIENT_TICK.register(EndCityFinderClient::tick);
+		ClientReceiveMessageEvents.ALLOW_CHAT.register((message, signed, sender, type, time) -> Party.onMessage(message, sender));
+		ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> overlay || Party.onMessage(message, null));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> Commands.register(dispatcher));
 		HudElementRegistry.attachElementAfter(VanillaHudElements.BOSS_BAR, Identifier.fromNamespaceAndPath(MOD_ID, "hud"), HudOverlay::extract);
 		LevelRenderEvents.BEFORE_GIZMOS.register(WorldMarkers::render);
@@ -109,6 +112,7 @@ public class EndCityFinderClient implements ClientModInitializer {
 			session = null;
 		}
 		SCANNER.reset();
+		Party.reset();
 	}
 
 	private static void tick(Minecraft mc) {
@@ -127,6 +131,7 @@ public class EndCityFinderClient implements ClientModInitializer {
 		while (addKey.consumeClick()) {
 			Commands.addNearPlayer(mc);
 		}
+		Party.tick(mc, s);
 		if (mc.level.dimension() != Level.END) {
 			return;
 		}
@@ -136,9 +141,11 @@ public class EndCityFinderClient implements ClientModInitializer {
 		s.updatePrediction(x, z, settings);
 		if (++ticks % 10 == 0) {
 			for (EndCity city : s.predicted()) {
-				if (Math.hypot(city.x() - x, city.z() - z) < settings.visitDistance && !s.isVisited(city)) {
-					s.setVisited(city, true);
-					message(Component.literal("Город " + city.x() + " " + city.z() + " отмечен посещённым").withStyle(ChatFormatting.GRAY));
+				boolean inside = x >= city.minX() - 4 && x <= city.maxX() + 5 && z >= city.minZ() - 4 && z <= city.maxZ() + 5
+						&& mc.player.getY() >= city.y() - 8;
+				if ((inside || Math.hypot(city.x() - x, city.z() - z) < settings.visitDistance) && s.setVisited(city, true)) {
+					Party.onVisited(s, city.key());
+					message(Component.literal("Город " + city.x() + " " + city.z() + " залутан, скрываю (/ecf looted показать)").withStyle(ChatFormatting.GRAY));
 				}
 			}
 		}
@@ -152,6 +159,9 @@ public class EndCityFinderClient implements ClientModInitializer {
 			}
 		}
 		if (phase != lastPhase) {
+			if (phase == FinderSession.Phase.SOLVED) {
+				Party.onSolved(s);
+			}
 			if (lastPhase != null && (phase == FinderSession.Phase.SOLVED || phase == FinderSession.Phase.CONTRADICTION
 					|| phase == FinderSession.Phase.NEED_MORE_CITIES || phase == FinderSession.Phase.AMBIGUOUS)) {
 				message(Component.literal("[ECF] " + s.detail()).withStyle(phase == FinderSession.Phase.SOLVED ? ChatFormatting.GREEN : ChatFormatting.YELLOW));

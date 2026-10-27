@@ -17,6 +17,8 @@ public final class Settings {
 	public boolean arrow = true;
 	/** Only cities with a ship count as the "nearest" target. */
 	public boolean shipsOnly = false;
+	/** Looted (visited) cities disappear from markers, map and list. */
+	public boolean hideVisited = true;
 	/** Radius around the player in which cities are predicted and shown. */
 	public int radius = 5000;
 	/** Distance below which a city is drawn at its real position with its outline. */

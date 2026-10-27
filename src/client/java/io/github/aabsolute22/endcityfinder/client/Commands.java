@@ -9,6 +9,7 @@ import java.util.List;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 
 import net.minecraft.ChatFormatting;
@@ -109,6 +110,33 @@ public final class Commands {
 					mc.execute(() -> mc.execute(() -> mc.setScreenAndShow(new EndMapScreen())));
 					return 1;
 				}))
+				.then(literal("party")
+						.executes(ctx -> partyList(ctx.getSource()))
+						.then(literal("add").then(argument("player", StringArgumentType.word())
+								.executes(ctx -> partyAdd(ctx.getSource(), StringArgumentType.getString(ctx, "player")))))
+						.then(literal("remove").then(argument("player", StringArgumentType.word())
+								.executes(ctx -> partyRemove(ctx.getSource(), StringArgumentType.getString(ctx, "player"))))))
+				.then(literal("share")
+						.executes(ctx -> share(ctx.getSource(), null))
+						.then(argument("player", StringArgumentType.word())
+								.executes(ctx -> share(ctx.getSource(), StringArgumentType.getString(ctx, "player")))))
+				.then(literal("accept").executes(ctx -> {
+					FinderSession s = session(ctx.getSource());
+					if (s != null) {
+						ctx.getSource().sendFeedback(Component.literal(Party.acceptOffer(s) ? "Сид принят" : "Нечего принимать"));
+					}
+					return 1;
+				}))
+				.then(literal("salt")
+						.executes(ctx -> salt(ctx.getSource()))
+						.then(literal("reset").executes(ctx -> setSalt(ctx.getSource(), null)))
+						.then(argument("value", IntegerArgumentType.integer())
+								.executes(ctx -> setSalt(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "value")))))
+				.then(literal("looted").executes(ctx -> toggle(ctx.getSource(), "Скрывать залутанные города", () -> {
+					Settings st = EndCityFinderClient.settings();
+					st.hideVisited = !st.hideVisited;
+					return st.hideVisited;
+				})))
 				.then(literal("reset").then(literal("confirm").executes(ctx -> {
 					FinderSession s = session(ctx.getSource());
 					if (s != null) {
@@ -138,6 +166,9 @@ public final class Commands {
 			"/ecf pillars, /ecf pillar <0-9> <высота>: пилоны",
 			"/ecf list [n], /ecf target <n|nearest>, /ecf visited <n>",
 			"/ecf seed <число>: если сид уже известен (подходит и полный сид мира)",
+			"/ecf salt [число|reset]: соль городов, если сервер её поменял (обычно вычисляется сама)",
+			"/ecf party add <ник>, /ecf share [ник]: делиться сидом и залутанными городами с другом",
+			"/ecf looted: показывать или скрывать залутанные города",
 			"/ecf ships, /ecf markers, /ecf arrow, /ecf hud, /ecf radius <блоки>, /ecf map",
 			"Клавиши: J карта, K маркеры, L добавить город рядом"
 		};
@@ -345,6 +376,9 @@ public final class Commands {
 		}
 		boolean now = !s.isVisited(city);
 		s.setVisited(city, now);
+		if (now) {
+			Party.onVisited(s, city.key());
+		}
 		source.sendFeedback(Component.literal("Город " + city.x() + " " + city.z() + (now ? " посещён" : " не посещён")));
 		return 1;
 	}
@@ -356,6 +390,77 @@ public final class Commands {
 		}
 		s.setManualSeed(seed);
 		source.sendFeedback(Component.literal(seed == null ? "Сид сброшен, считаю по наблюдениям" : "Использую сид " + seed));
+		return 1;
+	}
+
+	private static int partyList(FabricClientCommandSource source) {
+		FinderSession s = session(source);
+		if (s == null) {
+			return 0;
+		}
+		List<String> party = s.party();
+		source.sendFeedback(Component.literal(party.isEmpty() ? "Друзей нет: /ecf party add <ник>" : "Друзья: " + String.join(", ", party)));
+		return 1;
+	}
+
+	private static int partyAdd(FabricClientCommandSource source, String player) {
+		FinderSession s = session(source);
+		if (s == null) {
+			return 0;
+		}
+		s.addPartyMember(player);
+		source.sendFeedback(Component.literal(player + " в друзьях: сид и залутанные города будут ходить между вами автоматически (у него тоже должен быть мод и ты в его /ecf party)"));
+		if (s.solvedSeed() != null) {
+			Party.share(s, player);
+			source.sendFeedback(Component.literal("Отправил ему сид"));
+		}
+		return 1;
+	}
+
+	private static int partyRemove(FabricClientCommandSource source, String player) {
+		FinderSession s = session(source);
+		if (s == null) {
+			return 0;
+		}
+		source.sendFeedback(Component.literal(s.removePartyMember(player) ? player + " убран из друзей" : player + " не в друзьях"));
+		return 1;
+	}
+
+	private static int share(FabricClientCommandSource source, String player) {
+		FinderSession s = session(source);
+		if (s == null) {
+			return 0;
+		}
+		if (s.solvedSeed() == null) {
+			source.sendError(Component.literal("Сид ещё не найден, делиться нечем"));
+			return 0;
+		}
+		int n = Party.share(s, player);
+		if (n == 0) {
+			source.sendError(Component.literal("Кому? /ecf share <ник> или добавь друга: /ecf party add <ник>"));
+			return 0;
+		}
+		source.sendFeedback(Component.literal("Отправляю сид, соль и залутанные города (" + n + " получ.) личным сообщением"));
+		return 1;
+	}
+
+	private static int salt(FabricClientCommandSource source) {
+		FinderSession s = session(source);
+		if (s == null) {
+			return 0;
+		}
+		Integer salt = s.salt();
+		source.sendFeedback(Component.literal(salt == null ? "Соль городов ванильная (10387313)" : "Соль городов: " + salt));
+		return 1;
+	}
+
+	private static int setSalt(FabricClientCommandSource source, Integer value) {
+		FinderSession s = session(source);
+		if (s == null) {
+			return 0;
+		}
+		s.setSalt(value);
+		source.sendFeedback(Component.literal(value == null ? "Соль сброшена на ванильную" : "Соль городов: " + value + ", пересчитываю"));
 		return 1;
 	}
 

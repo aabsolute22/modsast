@@ -73,24 +73,33 @@ public final class CandidateFilter {
 				return new Verdict(seed, false, "predicts a city in an explored empty chunk");
 			}
 		}
-		if (!samples.isEmpty()) {
-			int mismatches = 0;
-			int limit = 1 + samples.size() / 10;
-			for (TerrainSample s : samples) {
-				int predicted = world.terrain().surfaceY(s.x(), s.z());
-				if (predicted == s.surfaceY()) {
-					continue;
-				}
-				// Small floating islands are a feature, not noise terrain; ignore solid surprises there.
-				if (predicted < 0 && world.islands().biomeOfChunk(s.x() >> 4, s.z() >> 4) == EndBiome.SMALL_ISLANDS) {
-					continue;
-				}
-				if (++mismatches > limit) {
-					return new Verdict(seed, false, "terrain mismatch");
-				}
-			}
+		if (!terrainMatches(world, samples)) {
+			return new Verdict(seed, false, "terrain mismatch");
 		}
 		return new Verdict(seed, true, "ok");
+	}
+
+	/**
+	 * Whether the noise terrain of this world matches what the client saw, allowing for 10% of columns
+	 * being changed by players.
+	 */
+	static boolean terrainMatches(EndWorld world, List<TerrainSample> samples) {
+		int mismatches = 0;
+		int limit = 1 + samples.size() / 10;
+		for (TerrainSample s : samples) {
+			int predicted = world.terrain().surfaceY(s.x(), s.z());
+			if (predicted == s.surfaceY()) {
+				continue;
+			}
+			// Small floating islands are a feature, not noise terrain; ignore solid surprises there.
+			if (predicted < 0 && world.islands().biomeOfChunk(s.x() >> 4, s.z() >> 4) == EndBiome.SMALL_ISLANDS) {
+				continue;
+			}
+			if (++mismatches > limit) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public List<Long> filter(List<Long> seeds) {

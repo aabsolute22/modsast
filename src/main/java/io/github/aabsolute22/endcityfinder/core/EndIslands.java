@@ -14,9 +14,51 @@ public final class EndIslands {
 	private final ConcurrentHashMap<Long, float[]> tiles = new ConcurrentHashMap<>();
 
 	public EndIslands(long seed) {
+		noise = noise(seed);
+	}
+
+	/** The island noise of a seed on its own, for brute-force checks that cannot afford the tile cache. */
+	public static SimplexNoise noise(long seed) {
 		LegacyRandom random = new LegacyRandom(seed);
 		random.skip(17292);
-		noise = new SimplexNoise(random);
+		return new SimplexNoise(random);
+	}
+
+	/**
+	 * Cache-free, exact equivalent of {@code biomeOfChunk(chunkX, chunkZ).allowsEndCity()}.
+	 * Highlands or midlands means the height value is at least 0, i.e. some island cone reaches the point;
+	 * cones are at most {@code 100 / 9} cells wide, so only a few nearby island points need the noise.
+	 */
+	public static boolean allowsEndCity(SimplexNoise noise, int chunkX, int chunkZ) {
+		if ((long) chunkX * (long) chunkX + (long) chunkZ * (long) chunkZ <= 4096L) {
+			return false;
+		}
+		int x = chunkX * 2 + 1;
+		int z = chunkZ * 2 + 1;
+		// The central island term only reaches 0 within 12.5 cells of the origin, far inside the end biome.
+		int k = x / 2;
+		int l = z / 2;
+		int m = x % 2;
+		int n = z % 2;
+		for (int o = -6; o <= 6; o++) {
+			for (int p = -6; p <= 6; p++) {
+				float h = (float) (m - o * 2);
+				float s = (float) (n - p * 2);
+				float distance = (float) Math.sqrt(h * h + s * s);
+				if (distance * 9.0F > 100.0F) {
+					continue;
+				}
+				long q = (long) (k + o);
+				long r = (long) (l + p);
+				if (q * q + r * r > 4096L && noise.getValue((double) q, (double) r) < -0.9F) {
+					float g = (Math.abs((float) q) * 3439.0F + Math.abs((float) r) * 147.0F) % 13.0F + 9.0F;
+					if (100.0F - distance * g >= 0.0F) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	/** Island radius factor at island grid point (each grid step is 16 blocks), or 0 if there is no island. */

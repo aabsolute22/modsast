@@ -19,6 +19,7 @@ import io.github.aabsolute22.endcityfinder.client.EndMapScreen;
 import io.github.aabsolute22.endcityfinder.client.FinderSession;
 import io.github.aabsolute22.endcityfinder.core.EndCity;
 import io.github.aabsolute22.endcityfinder.core.EndWorld;
+import io.github.aabsolute22.endcityfinder.core.ShareCodec;
 
 /**
  * Plays the mod for real: a dedicated server with a known seed, the client flies to the pillars and three End
@@ -187,6 +188,18 @@ public class EndCityFinderGameTest implements FabricClientGameTest {
 			typeCommand(context, "/ecf status");
 			context.waitTicks(20);
 			context.takeScreenshot("ecf_status");
+			// 8. Sharing: a friend in the party whispers looted cities and a seed (simulated with the console's /tell).
+			typeCommand(context, "/ecf party add Server");
+			context.waitTicks(5);
+			EndCity looted = session().shown(EndCityFinderClient.settings()).get(0);
+			server.runCommand("tell Player0 " + ShareCodec.visited(new long[] {looted.key()}).get(0));
+			await(context, "shared looted city", mc -> session().isVisited(looted), MINUTE);
+			check(session().shown(EndCityFinderClient.settings()).stream().noneMatch(c -> c.key() == looted.key()), "looted city from a friend is hidden");
+			long otherSeed = (SEED + 1) & ((1L << 48) - 1);
+			server.runCommand("tell Player0 " + ShareCodec.seed(otherSeed, 10387313));
+			await(context, "shared seed", mc -> session().solvedSeed() != null && session().solvedSeed() == otherSeed, 2 * MINUTE);
+			check(true, "seed received from a friend applied");
+			context.takeScreenshot("ecf_shared");
 			log("done");
 		}
 	}

@@ -28,6 +28,7 @@ import io.github.aabsolute22.endcityfinder.core.EndSpikes;
 import io.github.aabsolute22.endcityfinder.core.EndWorld;
 import io.github.aabsolute22.endcityfinder.core.LegacyRandom;
 import io.github.aabsolute22.endcityfinder.core.Placement;
+import io.github.aabsolute22.endcityfinder.core.SaltSolver;
 import io.github.aabsolute22.endcityfinder.core.SeedCracker;
 
 /**
@@ -91,7 +92,12 @@ public final class FinderSession {
 		long[] candidates;
 		int[] candidateKeys;
 		int[] candidateCities;
+		Integer candidateSalt;
 		Long target;
+		Integer salt;
+		Long saltSeed;
+		int[] saltCandidates;
+		List<String> party = new ArrayList<>();
 	}
 
 	private final String key;
@@ -108,13 +114,22 @@ public final class FinderSession {
 	private List<Long> candidates;
 	private int[] candidateKeys;
 	private Set<Integer> candidateCities;
+	private Integer candidateSalt;
+	/** The server's End city salt when it is not vanilla: set by hand, received from a friend or cracked. */
+	private Integer salt;
+	/** While the salt is not pinned down yet: the seed and the salts that still fit. */
+	private Long saltSeed;
+	private List<Integer> saltCandidates;
+	/** Players to share the seed and looted cities with; see {@link Party}. */
+	private final List<String> party = new ArrayList<>();
 
 	private final ExecutorService worker = daemonExecutor("endcityfinder-solver");
 	/** Separate from the solver so a long prediction never delays solving, and vice versa. */
 	private final ExecutorService predictor = daemonExecutor("endcityfinder-predictor");
 	private final AtomicBoolean solveQueued = new AtomicBoolean();
 	private final AtomicBoolean predictQueued = new AtomicBoolean();
-	private volatile SeedCracker activeCracker;
+	private volatile java.util.function.DoubleSupplier activeProgress;
+	private volatile Runnable activeCancel;
 	private volatile Phase phase = Phase.NEED_PILLARS;
 	private volatile String detail = "";
 	private volatile List<EndWorld> worlds = List.of();
@@ -176,6 +191,18 @@ public final class FinderSession {
 			visited.addAll(new LongOpenHashSet(data.visited));
 			manualSeed = data.manualSeed;
 			target = data.target;
+			salt = data.salt;
+			saltSeed = data.saltSeed;
+			if (data.saltCandidates != null) {
+				saltCandidates = new ArrayList<>();
+				for (int c : data.saltCandidates) {
+					saltCandidates.add(c);
+				}
+			}
+			if (data.party != null) {
+				party.addAll(data.party);
+			}
+			candidateSalt = data.candidateSalt;
 			if (data.candidates != null && data.candidateKeys != null && data.candidateCities != null) {
 				candidates = new ArrayList<>();
 				for (long c : data.candidates) {
@@ -202,6 +229,11 @@ public final class FinderSession {
 		data.visited = visited.toLongArray();
 		data.manualSeed = manualSeed;
 		data.target = target;
+		data.salt = salt;
+		data.saltSeed = saltSeed;
+		data.saltCandidates = saltCandidates == null ? null : saltCandidates.stream().mapToInt(Integer::intValue).toArray();
+		data.party = new ArrayList<>(party);
+		data.candidateSalt = candidateSalt;
 		if (candidates != null) {
 			data.candidates = candidates.stream().mapToLong(Long::longValue).toArray();
 			data.candidateKeys = candidateKeys;
@@ -227,9 +259,9 @@ public final class FinderSession {
 	}
 
 	public void close() {
-		SeedCracker cracker = activeCracker;
-		if (cracker != null) {
-			cracker.cancel();
+		Runnable cancel = activeCancel;
+		if (cancel != null) {
+			cancel.run();
 		}
 		worker.shutdownNow();
 		predictor.shutdownNow();
@@ -332,6 +364,9 @@ public final class FinderSession {
 			manualSeed = null;
 			target = null;
 			candidates = null;
+			salt = null;
+			saltSeed = null;
+			saltCandidates = null;
 			nextId = 1;
 			dirty = true;
 		}
@@ -377,10 +412,27 @@ public final class FinderSession {
 		return visited.contains(city.key());
 	}
 
-	public synchronized void setVisited(EndCity city, boolean value) {
-		if (value ? visited.add(city.key()) : visited.remove(city.key())) {
-			dirty = true;
+	/** Returns whether the state changed. */
+	public synchronized boolean setVisited(EndCity city, boolean value) {
+		boolean changed = value ? visited.add(city.key()) : visited.remove(city.key());
+		dirty |= changed;
+		return changed;
+	}
+
+	/** Marks cities (by start chunk) looted, e.g. as reported by a friend; returns how many were new. */
+	public synchronized int markVisited(long[] cityKeys) {
+		int added = 0;
+		for (long key : cityKeys) {
+			if (visited.add(key)) {
+				added++;
+			}
 		}
+		dirty |= added > 0;
+		return added;
+	}
+
+	public synchronized long[] visitedCities() {
+		return visited.toLongArray();
 	}
 
 	public synchronized void setTarget(EndCity city) {
@@ -399,8 +451,8 @@ public final class FinderSession {
 	}
 
 	public double progress() {
-		SeedCracker cracker = activeCracker;
-		return cracker == null ? -1 : cracker.progress();
+		java.util.function.DoubleSupplier p = activeProgress;
+		return p == null ? -1 : p.getAsDouble();
 	}
 
 	public List<EndWorld> worlds() {
@@ -408,7 +460,90 @@ public final class FinderSession {
 	}
 
 	public synchronized int candidateCount() {
+		if (saltCandidates != null && salt == null) {
+			return saltCandidates.size();
+		}
 		return candidates == null ? 0 : candidates.size();
+	}
+
+	/** The End city placement the solver assumes: vanilla unless the server's salt is known. */
+	public synchronized Placement placement() {
+		return placementFor(salt);
+	}
+
+	private static Placement placementFor(Integer salt) {
+		Placement vanilla = Placement.END_CITIES;
+		return salt == null ? vanilla : new Placement(vanilla.spacing(), vanilla.separation(), salt, vanilla.triangular());
+	}
+
+	public synchronized Integer salt() {
+		return salt;
+	}
+
+	/** Sets the server's End city salt by hand; {@code null} goes back to vanilla. */
+	public void setSalt(Integer value) {
+		synchronized (this) {
+			salt = value != null && value == Placement.END_CITIES.salt() ? null : value;
+			saltSeed = null;
+			saltCandidates = null;
+			candidates = null;
+			dirty = true;
+		}
+		requestSolve();
+	}
+
+	/** Seed and salt received from a friend: no search needed. */
+	public void applyShared(long seed, int sharedSalt) {
+		synchronized (this) {
+			manualSeed = seed & LegacyRandom.MASK;
+			salt = sharedSalt == Placement.END_CITIES.salt() ? null : sharedSalt;
+			saltSeed = null;
+			saltCandidates = null;
+			dirty = true;
+		}
+		requestSolve();
+	}
+
+	/** The solved seed, or null while it is not unique. */
+	public Long solvedSeed() {
+		List<EndWorld> ws = worlds;
+		return phase == Phase.SOLVED && ws.size() == 1 ? ws.get(0).seed() : null;
+	}
+
+	/** The salt of the solved world (vanilla salt when unchanged). */
+	public int solvedSalt() {
+		List<EndWorld> ws = worlds;
+		return ws.isEmpty() ? Placement.END_CITIES.salt() : ws.get(0).placement().salt();
+	}
+
+	public synchronized List<String> party() {
+		return new ArrayList<>(party);
+	}
+
+	public synchronized boolean addPartyMember(String name) {
+		for (String p : party) {
+			if (p.equalsIgnoreCase(name)) {
+				return false;
+			}
+		}
+		party.add(name);
+		dirty = true;
+		return true;
+	}
+
+	public synchronized boolean removePartyMember(String name) {
+		boolean removed = party.removeIf(p -> p.equalsIgnoreCase(name));
+		dirty |= removed;
+		return removed;
+	}
+
+	public synchronized boolean isPartyMember(String name) {
+		for (String p : party) {
+			if (p.equalsIgnoreCase(name)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public void requestSolve() {
@@ -430,6 +565,10 @@ public final class FinderSession {
 		}
 	}
 
+	private static int threads() {
+		return Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
+	}
+
 	private void solve() {
 		int[] spikeSnapshot;
 		List<ObservedCity> citySnapshot;
@@ -439,6 +578,10 @@ public final class FinderSession {
 		List<Long> previous;
 		int[] previousKeys;
 		Set<Integer> previousCities;
+		Integer previousSalt;
+		Integer knownSalt;
+		Long pendingSaltSeed;
+		List<Integer> pendingSalts;
 		synchronized (this) {
 			spikeSnapshot = spikes.clone();
 			citySnapshot = new ArrayList<>(cities.values());
@@ -451,9 +594,14 @@ public final class FinderSession {
 			previous = candidates;
 			previousKeys = candidateKeys;
 			previousCities = candidateCities;
+			previousSalt = candidateSalt;
+			knownSalt = salt;
+			pendingSaltSeed = saltSeed;
+			pendingSalts = saltCandidates == null ? null : new ArrayList<>(saltCandidates);
 		}
+		Placement placement = placementFor(knownSalt);
 		if (seed != null) {
-			publish(List.of(seed & LegacyRandom.MASK), null, null);
+			publish(List.of(seed & LegacyRandom.MASK), placement, null, null);
 			return;
 		}
 		List<SeedCracker.City> constraints = new ArrayList<>();
@@ -483,16 +631,31 @@ public final class FinderSession {
 			clearWorlds();
 			return;
 		}
-		CandidateFilter filter = new CandidateFilter(Placement.END_CITIES, constraints, empty, sampleSnapshot);
-		if (previous != null && Arrays.equals(previousKeys, keys) && cityIds.containsAll(previousCities)) {
-			setStatus(Phase.FILTERING, "проверяю " + previous.size() + " кандидатов");
-			List<Long> filtered = filter.filter(previous);
-			if (!filtered.isEmpty()) {
-				publish(filtered, keys, cityIds);
+		// The salt search already found the seed: new cities and explored chunks only narrow the salts down.
+		if (knownSalt == null && pendingSaltSeed != null && pendingSalts != null) {
+			setStatus(Phase.FILTERING, "проверяю " + pendingSalts.size() + " вариантов соли");
+			List<Integer> remaining = new ArrayList<>();
+			for (int candidate : pendingSalts) {
+				if (new CandidateFilter(placementFor(candidate), constraints, empty, sampleSnapshot).check(pendingSaltSeed).accepted()) {
+					remaining.add(candidate);
+				}
+			}
+			if (!remaining.isEmpty()) {
+				publishSalted(pendingSaltSeed, remaining);
 				return;
 			}
 		}
-		SeedCracker cracker = new SeedCracker(Placement.END_CITIES, keys, constraints, MAX_RAW_SEEDS);
+		CandidateFilter filter = new CandidateFilter(placement, constraints, empty, sampleSnapshot);
+		if (previous != null && Arrays.equals(previousKeys, keys) && cityIds.containsAll(previousCities)
+				&& java.util.Objects.equals(previousSalt, knownSalt)) {
+			setStatus(Phase.FILTERING, "проверяю " + previous.size() + " кандидатов");
+			List<Long> filtered = filter.filter(previous);
+			if (!filtered.isEmpty()) {
+				publish(filtered, placement, keys, cityIds);
+				return;
+			}
+		}
+		SeedCracker cracker = new SeedCracker(placement, keys, constraints, MAX_RAW_SEEDS);
 		double expected = cracker.expectedSeeds();
 		if (expected > MAX_EXPECTED_SEEDS) {
 			int more = (int) Math.ceil(Math.log(expected / MAX_EXPECTED_SEEDS) / Math.log(2) / 5.8);
@@ -501,12 +664,14 @@ public final class FinderSession {
 			return;
 		}
 		setStatus(Phase.SEARCHING, "перебор " + keys.length + " × 2^32 сидов");
-		activeCracker = cracker;
+		activeProgress = cracker::progress;
+		activeCancel = cracker::cancel;
 		SeedCracker.Result result;
 		try {
-			result = cracker.run(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
+			result = cracker.run(threads());
 		} finally {
-			activeCracker = null;
+			activeProgress = null;
+			activeCancel = null;
 		}
 		if (result.cancelled()) {
 			return;
@@ -517,7 +682,87 @@ public final class FinderSession {
 			return;
 		}
 		setStatus(Phase.FILTERING, "проверяю " + result.seeds().size() + " кандидатов");
-		publish(filter.filter(result.seeds()), keys, cityIds);
+		List<Long> filtered = filter.filter(result.seeds());
+		if (!filtered.isEmpty()) {
+			publish(filtered, placement, keys, cityIds);
+			return;
+		}
+		if (knownSalt != null) {
+			publish(List.of(), placement, keys, cityIds);
+			setStatus(Phase.CONTRADICTION, "с солью " + knownSalt + " ничего не сходится: проверь соль (/ecf salt reset) и города (/ecf cities)");
+			return;
+		}
+		solveUnknownSalt(keys, constraints, empty, sampleSnapshot);
+	}
+
+	/** Nothing fits the vanilla salt: assume the server changed it and crack seed and salt separately. */
+	private void solveUnknownSalt(int[] keys, List<SeedCracker.City> constraints, List<Long> empty, List<CandidateFilter.TerrainSample> sampleSnapshot) {
+		SaltSolver solver = new SaltSolver(Placement.END_CITIES, keys, constraints, empty, sampleSnapshot);
+		if (solver.rotatedCities() < 3) {
+			setStatus(Phase.CONTRADICTION, "с ванильной солью не сходится. либо город указан неверно (/ecf cities), либо сервер поменял соль: "
+					+ "тогда найди пролётом ещё города, нужно хотя бы 3 с известным поворотом (сейчас " + solver.rotatedCities() + ")");
+			clearWorlds();
+			return;
+		}
+		setStatus(Phase.SEARCHING, "с ванильной солью не сходится, вычисляю соль сервера (до пары минут)");
+		activeProgress = solver::progress;
+		activeCancel = solver::cancel;
+		SaltSolver.Result result;
+		try {
+			result = solver.run(threads());
+		} finally {
+			activeProgress = null;
+			activeCancel = null;
+		}
+		if (result.cancelled()) {
+			return;
+		}
+		if (result.problem() != null) {
+			setStatus(result.problem().startsWith("слишком") ? Phase.NEED_MORE_CITIES : Phase.CONTRADICTION, result.problem());
+			clearWorlds();
+			return;
+		}
+		long first = result.solutions().get(0).seed();
+		boolean oneSeed = result.solutions().stream().allMatch(sol -> sol.seed() == first);
+		if (oneSeed) {
+			publishSalted(first, result.solutions().stream().map(SaltSolver.Solution::salt).toList());
+			return;
+		}
+		List<EndWorld> list = new ArrayList<>();
+		for (SaltSolver.Solution sol : result.solutions()) {
+			if (list.size() < MAX_WORLDS) {
+				list.add(new EndWorld(sol.seed(), placementFor(sol.salt())));
+			}
+		}
+		worlds = List.copyOf(list);
+		setStatus(Phase.AMBIGUOUS, result.solutions().size() + " вариантов сида и соли, найди ещё города или полетай");
+		predictedAtX = Double.NaN;
+	}
+
+	private void publishSalted(long seed, List<Integer> salts) {
+		synchronized (this) {
+			saltSeed = seed;
+			if (salts.size() == 1) {
+				salt = salts.get(0) == Placement.END_CITIES.salt() ? null : salts.get(0);
+				saltCandidates = null;
+				candidates = null;
+				manualSeed = null;
+			} else {
+				saltCandidates = new ArrayList<>(salts);
+			}
+			dirty = true;
+		}
+		List<EndWorld> list = new ArrayList<>();
+		for (int i = 0; i < Math.min(MAX_WORLDS, salts.size()); i++) {
+			list.add(new EndWorld(seed, placementFor(salts.get(i))));
+		}
+		worlds = List.copyOf(list);
+		if (salts.size() == 1) {
+			setStatus(Phase.SOLVED, "сид энда " + seed + ", соль городов на сервере " + salts.get(0));
+		} else {
+			setStatus(Phase.AMBIGUOUS, "сид найден, соль городов: " + salts.size() + " варианта, найди ещё город или полетай");
+		}
+		predictedAtX = Double.NaN;
 	}
 
 	private void setStatus(Phase phase, String detail) {
@@ -531,11 +776,12 @@ public final class FinderSession {
 		predictedFor = List.of();
 	}
 
-	private void publish(List<Long> seeds, int[] keys, Set<Integer> cityIds) {
+	private void publish(List<Long> seeds, Placement placement, int[] keys, Set<Integer> cityIds) {
 		synchronized (this) {
 			candidates = keys == null ? null : new ArrayList<>(seeds);
 			candidateKeys = keys;
 			candidateCities = cityIds;
+			candidateSalt = placement.salt() == Placement.END_CITIES.salt() ? null : placement.salt();
 			dirty = true;
 		}
 		if (seeds.isEmpty()) {
@@ -545,11 +791,12 @@ public final class FinderSession {
 		}
 		List<EndWorld> list = new ArrayList<>();
 		for (int i = 0; i < Math.min(MAX_WORLDS, seeds.size()); i++) {
-			list.add(new EndWorld(seeds.get(i)));
+			list.add(new EndWorld(seeds.get(i), placement));
 		}
 		worlds = List.copyOf(list);
+		String saltNote = placement.salt() == Placement.END_CITIES.salt() ? "" : ", соль " + placement.salt();
 		if (seeds.size() == 1) {
-			setStatus(Phase.SOLVED, "сид энда " + seeds.get(0));
+			setStatus(Phase.SOLVED, "сид энда " + seeds.get(0) + saltNote);
 		} else {
 			setStatus(Phase.AMBIGUOUS, seeds.size() + " кандидатов, показываю общие города; найди ещё город или полетай");
 		}
@@ -562,10 +809,13 @@ public final class FinderSession {
 		return predicted;
 	}
 
-	/** The predicted cities the player wants to see: only those with a ship when {@code shipsOnly} is on. */
+	/** The predicted cities the player wants to see: without looted ones and, with {@code shipsOnly}, only those with a ship. */
 	public List<EndCity> shown(Settings settings) {
 		List<EndCity> all = predicted;
-		return settings.shipsOnly ? all.stream().filter(EndCity::ship).toList() : all;
+		if (!settings.shipsOnly && !settings.hideVisited) {
+			return all;
+		}
+		return all.stream().filter(c -> (!settings.shipsOnly || c.ship()) && (!settings.hideVisited || !isVisited(c))).toList();
 	}
 
 	/** Whether {@link #predicted()} belongs to the current solver result. */
