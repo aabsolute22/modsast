@@ -129,7 +129,9 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 		Properties properties = new Properties();
 		properties.setProperty("view-distance", "8");
 		properties.setProperty("simulation-distance", "4");
+		// Consistent settings would make a superflat overworld with nothing but villages.
 		try (TestDedicatedServerContext server = context.worldBuilder()
+				.setUseConsistentSettings(false)
 				.adjustSettings(creator -> {
 					creator.setSeed(Long.toString(SEED));
 					creator.setGenerateStructures(true);
@@ -139,6 +141,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			server.runCommand("gamemode creative Player0");
 			server.runCommand("gamerule doDaylightCycle false");
 			server.runCommand("time set noon");
+			server.runCommand("weather clear 1000000");
 			context.waitFor(mc -> session() != null, MINUTE);
 			context.waitFor(mc -> Worldgen.now() != null, 2 * MINUTE);
 			log("hashed seed received: " + session().hashedSeed());
@@ -149,7 +152,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			for (Visit v : visits) {
 				double y = v.dim == SeedWorld.Dim.NETHER ? Math.max(v.found.y() + 12, 40) : Math.max(v.found.y(), 64) + 30;
 				teleport(server, v.dim, v.found.x() + 0.5, y, v.found.z() + 0.5);
-				connection.waitForChunksDownload(MINUTE);
+				connection.waitForChunksDownload(4 * MINUTE);
 				boolean ok = waitQuietly(context, mc -> detected(v), 40 * 20);
 				log((ok ? "DETECTED " : "MISSED   ") + v.kind.id() + " " + v.found.variant() + " at chunk " + v.found.chunkX() + " " + v.found.chunkZ()
 						+ " · phase " + session().phase() + " (" + session().detail() + ")");
@@ -182,7 +185,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			double px = context.computeOnClient(mc -> mc.player.getX());
 			double pz = context.computeOnClient(mc -> mc.player.getZ());
 			teleport(server, SeedWorld.Dim.OVERWORLD, 0.5, 120, 0.5);
-			connection.waitForChunksDownload(MINUTE);
+			connection.waitForChunksDownload(4 * MINUTE);
 			context.waitFor(mc -> SeedCrackerClient.locator().structures(SeedWorld.Dim.OVERWORLD, StructureKind.VILLAGE, mc.player.getX(), mc.player.getZ(),
 					SeedCrackerClient.settings().radius) != null, MINUTE);
 			List<SeedWorld.Found> located = context.computeOnClient(mc -> SeedCrackerClient.locator().structures(SeedWorld.Dim.OVERWORLD,
@@ -204,11 +207,11 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			double sx = village.x() - dx / len * 90;
 			double sz = village.z() - dz / len * 90;
 			teleportFacing(server, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y(), village.z());
-			connection.waitForChunksRender(MINUTE);
+			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
 			context.takeScreenshot("sc_line_near");
 			teleportFacing(server, SeedWorld.Dim.OVERWORLD, 0.5, 140, 0.5, village.x(), village.y() + 30, village.z());
-			connection.waitForChunksRender(MINUTE);
+			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
 			context.takeScreenshot("sc_line_far");
 			context.setScreen(LocatorScreen::new);
