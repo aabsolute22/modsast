@@ -36,16 +36,18 @@ public final class WorldRender {
 			return;
 		}
 		Vec3 cam = context.levelState().cameraRenderState.pos;
+		// Lines leave from the player, which is the camera only in first person.
+		Vec3 eye = mc.options.getCameraType().isFirstPerson() ? cam : mc.player.getEyePosition(mc.getDeltaTracker().getGameTimeDeltaPartialTick(false));
 		double time = (System.currentTimeMillis() % 3_600_000L) / 1000.0;
 		double reach = Math.max(48, Math.min(240, mc.options.getEffectiveRenderDistance() * 16 * 0.7));
 		try (Gizmos.TemporaryCollection ignored = context.levelRenderer().collectPerFrameRenderThreadGizmos()) {
 			Session.Target target = s.target();
 			if (settings.lines && target != null && Targets.dimId(dim).equals(target.dim)) {
 				Vec3 to = new Vec3(target.x + 0.5, target.y + 1.0, target.z + 0.5);
-				drawPath(cam, to, Targets.color(target), target.label, true, reach, time);
+				drawPath(cam, eye, to, Targets.color(target), target.label, true, reach, time);
 			}
 			if (settings.markers && s.seed() != null) {
-				drawTracked(mc, s, settings, dim, cam, reach, time, target);
+				drawTracked(mc, s, settings, dim, cam, eye, reach, time, target);
 			}
 			if (settings.slimeChunks && s.seed() != null && dim == SeedWorld.Dim.OVERWORLD) {
 				drawSlimeChunks(s.seed(), cam);
@@ -53,7 +55,8 @@ public final class WorldRender {
 		}
 	}
 
-	private static void drawTracked(Minecraft mc, Session s, Settings settings, SeedWorld.Dim dim, Vec3 cam, double reach, double time, Session.Target target) {
+	private static void drawTracked(Minecraft mc, Session s, Settings settings, SeedWorld.Dim dim, Vec3 cam, Vec3 eye, double reach, double time,
+			Session.Target target) {
 		Locator locator = SeedCrackerClient.locator();
 		for (String id : settings.tracked) {
 			StructureKind kind = StructureKind.byId(id);
@@ -78,7 +81,7 @@ public final class WorldRender {
 				lines++;
 				int color = s.isVisited(f.key()) ? 0xFF8A8A8A : kind.color;
 				Vec3 to = new Vec3(f.x() + 0.5, f.y() + 1.0, f.z() + 0.5);
-				drawPath(cam, to, color, Targets.label(f), false, reach, time);
+				drawPath(cam, eye, to, color, Targets.label(f), false, reach, time);
 				if (Math.hypot(f.x() - cam.x, f.z() - cam.z) < reach) {
 					SeedWorld.Found d = locator.details(dim, f);
 					if (d.box() != null) {
@@ -98,19 +101,23 @@ public final class WorldRender {
 		}
 	}
 
-	/** Where the arc starts: just ahead of the player's chest, towards the target. */
-	private static Vec3 start(Vec3 cam, Vec3 target) {
-		Vec3 flat = new Vec3(target.x - cam.x, 0, target.z - cam.z);
+	/**
+	 * Where the arc starts: by the player's right hand, towards the target. Off to the side on purpose: an arc whose
+	 * plane goes through the eye would look like a straight stick.
+	 */
+	private static Vec3 start(Vec3 eye, Vec3 target) {
+		Vec3 flat = new Vec3(target.x - eye.x, 0, target.z - eye.z);
 		Vec3 dir = flat.lengthSqr() < 1e-6 ? new Vec3(0, 0, 1) : flat.normalize();
-		return cam.add(dir.scale(0.9)).add(0, -0.55, 0);
+		Vec3 right = new Vec3(-dir.z, 0, dir.x);
+		return eye.add(dir.scale(0.7)).add(right.scale(0.4)).add(0, -0.5, 0);
 	}
 
 	/**
 	 * The arc itself. Near targets get the full arc plus the beacon; far ones end on a marker {@code reach} blocks away
 	 * at a height between the player and the target.
 	 */
-	private static void drawPath(Vec3 cam, Vec3 target, int color, String text, boolean main, double reach, double time) {
-		Vec3 a = start(cam, target);
+	private static void drawPath(Vec3 cam, Vec3 eye, Vec3 target, int color, String text, boolean main, double reach, double time) {
+		Vec3 a = start(eye, target);
 		double flat = Math.hypot(target.x - a.x, target.z - a.z);
 		boolean near = flat <= reach;
 		Vec3 end;

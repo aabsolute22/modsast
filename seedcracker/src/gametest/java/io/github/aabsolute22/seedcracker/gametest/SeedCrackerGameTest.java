@@ -7,6 +7,7 @@ import java.util.function.Predicate;
 
 import com.mojang.blaze3d.platform.InputConstants;
 
+import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 
@@ -243,6 +244,12 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(40);
 			context.takeScreenshot("sc_line_side");
+			// Third person shows the whole arc leaving the player.
+			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y() + 15, village.z());
+			context.runOnClient(mc -> mc.options.setCameraType(CameraType.THIRD_PERSON_BACK));
+			context.waitTicks(40);
+			context.takeScreenshot("sc_line_third");
+			context.runOnClient(mc -> mc.options.setCameraType(CameraType.FIRST_PERSON));
 			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, 0.5, 140, 0.5, village.x(), village.y() + 30, village.z());
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
