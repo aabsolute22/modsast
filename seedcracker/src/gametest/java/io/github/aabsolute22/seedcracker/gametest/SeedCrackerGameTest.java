@@ -312,6 +312,44 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 					}
 				}
 			}
+			if (matcher != null && p0 instanceof net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece pe
+					&& pe.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single) {
+				String path = single.getTemplateLocation().getPath();
+				io.github.aabsolute22.seedcracker.world.TemplateMatcher.BlockSource src = (x, y, z) -> mc.level.hasChunk(x >> 4, z >> 4)
+						? SeedCrackerClient.scanner().canon(mc.level.getBlockState(new BlockPos(x, y, z)).getBlock()) : null;
+				b.append(" | start ").append(path).append(" at ").append(pe.getPosition().toShortString()).append(" rot ").append(pe.getRotation());
+				for (var spec : matcher.templates().specs()) {
+					if (!spec.template().equals(path) || spec.kind() != v.kind) {
+						continue;
+					}
+					b.append(" anchor ").append(spec.anchor()).append(" threshold ").append(spec.threshold()).append(" signature ").append(spec.signature().size());
+					for (var variant : spec.variants()) {
+						int[] m = io.github.aabsolute22.seedcracker.world.TemplateMatcher.count(variant, v.found.chunkX() * 16, pe.getPosition().getY(),
+								v.found.chunkZ() * 16, src);
+						b.append(' ').append(variant.rotation()).append('=').append(m[0]).append('/').append(m[1]);
+					}
+					// Every anchor block of the start as the client has it, matched without any biome filter.
+					var box = p0.getBoundingBox();
+					int anchors = 0;
+					int matching = 0;
+					java.util.Set<String> around = new java.util.TreeSet<>();
+					for (BlockPos q : BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ())) {
+						if (!spec.anchor().equals(src.canonAt(q.getX(), q.getY(), q.getZ()))) {
+							continue;
+						}
+						anchors++;
+						around.add(SeedWorld.biomeId(mc.level.getNoiseBiome(q.getX() >> 2, q.getY() >> 2, q.getZ() >> 2)));
+						for (var m : matcher.fromAnchor(q.getX(), q.getY(), q.getZ(), spec.anchor(), src)) {
+							if (m.kind() == v.kind && m.chunkX() == v.found.chunkX() && m.chunkZ() == v.found.chunkZ()) {
+								matching++;
+								break;
+							}
+						}
+					}
+					b.append(" | anchors ").append(anchors).append(" matching ").append(matching).append(" biomes there ").append(around)
+							.append(" allowed ").append(around.stream().filter(spec.biomes()::contains).toList());
+				}
+			}
 			return b.toString();
 		});
 		log("  diag: " + report);
