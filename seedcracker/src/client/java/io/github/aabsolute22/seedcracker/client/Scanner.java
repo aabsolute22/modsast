@@ -39,7 +39,6 @@ import io.github.aabsolute22.seedcracker.world.Worldgen;
  */
 public final class Scanner {
 	private static final int CHUNKS_PER_TICK = 4;
-	private static final int MATCH_RETRIES = 8;
 
 	/** A rare block that may belong to a start piece; matched once the surrounding chunks are in. */
 	private record Hit(int x, int y, int z, String canon) {
@@ -53,7 +52,8 @@ public final class Scanner {
 	private final LongOpenHashSet queued = new LongOpenHashSet();
 	private final LongOpenHashSet scanned = new LongOpenHashSet();
 	private final List<Hit> hits = new ArrayList<>();
-	private final Map<Hit, Integer> retries = new HashMap<>();
+	/** Hits that did not match while chunks around them were missing, by their chunk; retried when a neighbour arrives. */
+	private final Long2ObjectOpenHashMap<List<Hit>> parked = new Long2ObjectOpenHashMap<>();
 	private final Long2ObjectOpenHashMap<Extent> prismarine = new Long2ObjectOpenHashMap<>();
 	private final LongOpenHashSet fortressChecked = new LongOpenHashSet();
 	/** Chunks full of prismarine whose monument could not be measured yet (neighbours missing). */
@@ -70,7 +70,7 @@ public final class Scanner {
 		queued.clear();
 		scanned.clear();
 		hits.clear();
-		retries.clear();
+		parked.clear();
 		prismarine.clear();
 		fortressChecked.clear();
 		monumentPending.clear();
@@ -145,6 +145,13 @@ public final class Scanner {
 		if (++ticks % 10 == 0) {
 			matchHits(level, session, solver);
 		}
+		if (ticks % 200 == 7 && !parked.isEmpty()) {
+			for (long key : parked.keySet().toLongArray()) {
+				if (!level.hasChunk(Packed.x(key), Packed.z(key))) {
+					parked.remove(key);
+				}
+			}
+		}
 		if (ticks % 40 == 5 && !monumentPending.isEmpty()) {
 			for (long key : monumentPending.toLongArray()) {
 				if (checkMonument(session, Packed.x(key), Packed.z(key)) != 0) {
@@ -180,6 +187,14 @@ public final class Scanner {
 		int cx = chunk.getPos().x();
 		int cz = chunk.getPos().z();
 		scanned.add(Packed.pack(cx, cz));
+		for (int dx = -2; dx <= 2; dx++) {
+			for (int dz = -2; dz <= 2; dz++) {
+				List<Hit> waiting = parked.remove(Packed.pack(cx + dx, cz + dz));
+				if (waiting != null) {
+					hits.addAll(waiting);
+				}
+			}
+		}
 		sampleBiome(chunk, session);
 		LevelChunkSection[] sections = chunk.getSections();
 		int minSection = chunk.getMinY() >> 4;
@@ -311,16 +326,18 @@ public final class Scanner {
 				}
 			}
 			if (matches.isEmpty()) {
-				// Neighbouring chunks may still be missing; try a few more times.
-				int n = retries.merge(h, 1, Integer::sum);
-				if (n < MATCH_RETRIES && nearUnloaded(level, h.x, h.z)) {
-					hits.add(h);
-				} else {
-					retries.remove(h);
+				// Part of the start may sit in chunks that have not arrived yet: wait for them instead of giving up.
+				if (nearUnloaded(level, h.x, h.z)) {
+					long key = Packed.pack(h.x >> 4, h.z >> 4);
+					List<Hit> waiting = parked.get(key);
+					if (waiting == null) {
+						waiting = new ArrayList<>();
+						parked.put(key, waiting);
+					}
+					waiting.add(h);
 				}
 				continue;
 			}
-			retries.remove(h);
 			TemplateMatcher.Match m0 = matches.get(0);
 			SeedCrackerClient.LOG.info("Template match {} {} rot {} mirror {} start {} at chunk {} {} y {} score {}/{} from {} at {} {} {}",
 					m0.kind().id(), m0.variant().spec().template(), m0.variant().rotation(), m0.variant().mirror(), m0.variant().startRotation(),
