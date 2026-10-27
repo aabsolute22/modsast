@@ -194,9 +194,9 @@ public final class Commands {
 			return 0;
 		}
 		source.sendFeedback(Component.literal(HudOverlay.statusText(s)).withStyle(ChatFormatting.GOLD));
-		source.sendFeedback(Component.literal(String.format("структур %d (~%.0f бит) · биомов %d · хэш сида %s · вариантов сида структур %d",
-				s.observations().size(), s.informationBits(), s.biomeSampleCount(), s.hashedSeed() != null ? "есть" : "нет",
-				s.structureSeeds().size())));
+		String variants = s.seed() == null && !s.structureSeeds().isEmpty() ? " · вариантов сида структур " + s.structureSeeds().size() : "";
+		source.sendFeedback(Component.literal(String.format("структур %d (~%.0f бит) · биомов %d · хэш сида %s",
+				s.observations().size(), s.informationBits(), s.biomeSampleCount(), s.hashedSeed() != null ? "есть" : "нет") + variants));
 		if (s.seed() != null) {
 			source.sendFeedback(SeedCrackerClient.seedLine("сид: ", s.seed()));
 		} else {

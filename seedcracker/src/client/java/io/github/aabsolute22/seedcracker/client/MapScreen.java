@@ -161,7 +161,7 @@ public final class MapScreen extends Screen {
 			HudOverlay.drawArrow(g, x, z, mc.player.getYRot() + 180.0f, 0xFF000000, 1);
 			HudOverlay.drawArrow(g, x, z, mc.player.getYRot() + 180.0f, 0xFFFFFFFF, 0);
 		}
-		g.fill(0, 0, width, 24, 0xB0000000);
+		g.fill(0, 0, width, 24, 0xE8101018);
 		StringBuilder legend = new StringBuilder();
 		for (StructureKind k : kinds) {
 			legend.append(legend.length() == 0 ? "" : ", ").append(SeedCrackerClient.name(k));

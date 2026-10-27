@@ -85,7 +85,10 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 		server.runCommand(String.format("execute in %s run tp Player0 %.1f %.1f %.1f", dimName(dim), x, y, z));
 	}
 
-	private static void teleportFacing(TestDedicatedServerContext server, SeedWorld.Dim dim, double x, double y, double z, double fx, double fy, double fz) {
+	private static void teleportFacing(TestDedicatedServerContext server, TestDedicatedServerConnection connection, SeedWorld.Dim dim, double x, double y,
+			double z, double fx, double fy, double fz) {
+		teleport(server, dim, x, y, z);
+		connection.waitForChunksDownload(4 * MINUTE);
 		server.runCommand(String.format("execute in %s run setblock %d %d %d minecraft:glass", dimName(dim), (int) Math.floor(x), (int) Math.floor(y) - 1,
 				(int) Math.floor(z)));
 		server.runCommand(String.format("execute in %s run tp Player0 %.1f %.1f %.1f facing %.1f %.1f %.1f", dimName(dim), x, y, z, fx, fy, fz));
@@ -100,9 +103,11 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 		for (StructureKind k : List.of(StructureKind.DESERT_PYRAMID, StructureKind.JUNGLE_TEMPLE, StructureKind.SWAMP_HUT, StructureKind.IGLOO,
 				StructureKind.VILLAGE, StructureKind.SHIPWRECK, StructureKind.RUINED_PORTAL, StructureKind.OCEAN_MONUMENT, StructureKind.TRAIL_RUINS,
 				StructureKind.ANCIENT_CITY, StructureKind.TRIAL_CHAMBERS, StructureKind.OCEAN_RUIN)) {
-			List<SeedWorld.Found> found = over.near(k, 0, 0, 1800);
-			if (!found.isEmpty()) {
-				visits.add(new Visit(k, found.get(0), SeedWorld.Dim.OVERWORLD));
+			for (SeedWorld.Found f : over.near(k, 0, 0, 1800)) {
+				if (k != StructureKind.OCEAN_RUIN || bigRuin(over, f)) {
+					visits.add(new Visit(k, f, SeedWorld.Dim.OVERWORLD));
+					break;
+				}
 			}
 		}
 		List<SeedWorld.Found> treasures = over.near(StructureKind.BURIED_TREASURE, 0, 0, 900);
@@ -177,6 +182,27 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			})) {
 				log(line);
 			}
+			List<String[]> exact = context.computeOnClient(mc -> {
+				List<String[]> out = new ArrayList<>();
+				for (Session.Obs o : session().observations()) {
+					if (o.candidates.size() == 1) {
+						out.add(new String[] {o.kind, o.dim, Integer.toString(o.candidates.get(0)[0]), Integer.toString(o.candidates.get(0)[1])});
+					}
+				}
+				return out;
+			});
+			int falsePositives = 0;
+			for (String[] o : exact) {
+				StructureKind k = StructureKind.byId(o[0]);
+				SeedWorld w = "nether".equals(o[1]) ? nether : over;
+				var stub = w.stubAt(w.set(k.spread), Integer.parseInt(o[2]), Integer.parseInt(o[3]));
+				boolean real = stub.isPresent() && stub.get().structure().unwrapKey().map(key -> k.structures.contains(key.identifier().getPath())).orElse(false);
+				if (!real) {
+					falsePositives++;
+					log("FALSE POSITIVE " + String.join(" ", o));
+				}
+			}
+			check(falsePositives == 0, "every exact detection is a real structure (" + exact.size() + ")");
 			boolean solved = waitQuietly(context, mc -> session().phase() == Session.Phase.SOLVED, 6 * MINUTE);
 			log("final phase " + session().phase() + " · " + session().detail() + " · biome samples " + session().biomeSampleCount());
 			check(solved && session().seed() != null && session().seed() == SEED, "cracked the real seed " + SEED);
@@ -206,11 +232,18 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			double len = Math.hypot(dx, dz);
 			double sx = village.x() - dx / len * 90;
 			double sz = village.z() - dz / len * 90;
-			teleportFacing(server, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y(), village.z());
+			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, village.x(), village.y(), village.z());
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
 			context.takeScreenshot("sc_line_near");
-			teleportFacing(server, SeedWorld.Dim.OVERWORLD, 0.5, 140, 0.5, village.x(), village.y() + 30, village.z());
+			// From the side the arc shows its shape: look past it, half way along and off to the left.
+			double mx = (sx + village.x()) / 2 - dz / len * 45;
+			double mz = (sz + village.z()) / 2 + dx / len * 45;
+			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, sx, village.y() + 25, sz, mx, village.y() + 12, mz);
+			connection.waitForChunksRender(4 * MINUTE);
+			context.waitTicks(40);
+			context.takeScreenshot("sc_line_side");
+			teleportFacing(server, connection, SeedWorld.Dim.OVERWORLD, 0.5, 140, 0.5, village.x(), village.y() + 30, village.z());
 			connection.waitForChunksRender(4 * MINUTE);
 			context.waitTicks(60);
 			context.takeScreenshot("sc_line_far");
@@ -273,6 +306,16 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			return b.toString();
 		});
 		log("  diag: " + report);
+	}
+
+	/** Small ocean ruins are a handful of blocks; only big ones are recognised. */
+	private static boolean bigRuin(SeedWorld w, SeedWorld.Found f) {
+		var start = w.startAt(w.set(StructureKind.OCEAN_RUIN.spread), f.chunkX(), f.chunkZ());
+		if (start.isEmpty()) {
+			return false;
+		}
+		var box = start.get().getPieces().get(0).getBoundingBox();
+		return Math.max(box.getXSpan(), box.getZSpan()) >= 10;
 	}
 
 	private static void check(boolean condition, String message) {

@@ -131,8 +131,8 @@ public final class WorldRender {
 		int segments = (int) Math.max(12, Math.min(72, length / 1.4));
 		Vec3 prev = a;
 		double travelled = 0;
-		float glowWidth = main ? 8f : 4.5f;
-		float coreWidth = main ? 2.6f : 1.6f;
+		float glowWidth = main ? 9f : 5f;
+		float coreWidth = main ? 3f : 1.8f;
 		for (int i = 1; i <= segments; i++) {
 			double t = (double) i / segments;
 			double u = 1 - t;
@@ -146,7 +146,7 @@ public final class WorldRender {
 			int base = mix(0xFFFFFFFF, color, 0.35 + 0.65 * t);
 			int core = mix(base, 0xFFFFFFFF, pulse * 0.75);
 			int coreAlpha = (int) (fadeIn * (150 + 105 * Math.max(t, pulse)));
-			int glowAlpha = (int) (fadeIn * (main ? 38 : 22) * (1 + 1.6 * pulse));
+			int glowAlpha = (int) (fadeIn * (main ? 64 : 36) * (1 + 1.4 * pulse));
 			Gizmos.line(prev, p, withAlpha(color, glowAlpha), glowWidth).setAlwaysOnTop();
 			Gizmos.line(prev, p, withAlpha(core, coreAlpha), coreWidth).setAlwaysOnTop();
 			prev = p;
@@ -173,7 +173,7 @@ public final class WorldRender {
 			double y0 = bottom + (top - bottom) * i / steps;
 			double y1 = bottom + (top - bottom) * (i + 1) / steps;
 			double fade = 1 - (double) i / steps;
-			Gizmos.line(new Vec3(target.x, y0, target.z), new Vec3(target.x, y1, target.z), withAlpha(color, (int) (60 * fade)), main ? 10f : 6f).setAlwaysOnTop();
+			Gizmos.line(new Vec3(target.x, y0, target.z), new Vec3(target.x, y1, target.z), withAlpha(color, (int) (85 * fade)), main ? 11f : 6f).setAlwaysOnTop();
 			Gizmos.line(new Vec3(target.x, y0, target.z), new Vec3(target.x, y1, target.z), withAlpha(mix(color, 0xFFFFFFFF, 0.4), (int) (230 * fade)),
 					main ? 2.5f : 1.6f).setAlwaysOnTop();
 		}

@@ -225,7 +225,7 @@ public final class LocatorScreen extends Screen {
 				double d = f.distanceTo(px, pz);
 				boolean isTarget = target != null && target.x == f.x() && target.z == f.z();
 				String title = Targets.label(f) + " · " + Targets.distance(d) + " " + Targets.compass(f.x() - px, f.z() - pz) + (visited ? " · был" : "");
-				String sub = f.x() + " " + f.y() + " " + f.z() + "  (ЛКМ вести, ПКМ отметить посещённым)";
+				String sub = f.x() + " " + f.y() + " " + f.z() + "  · ЛКМ вести, ПКМ посещено";
 				out.add(new Row(title, sub, visited ? 0xFF8A8A8A : c.kind.color, () -> setTarget(Targets.of(f, dim)),
 						() -> s.setVisited(f.key(), !visited), isTarget));
 			}
@@ -337,13 +337,25 @@ public final class LocatorScreen extends Screen {
 					g.fill(rx, y, rx + rw, y + RESULT_ROW - 2, r.highlighted ? 0x4060F0FF : 0x30FFFFFF);
 				}
 				g.fill(rx, y, rx + 2, y + RESULT_ROW - 2, r.color);
-				g.text(font, r.title, rx + 6, y + 2, r.color, false);
-				g.text(font, r.sub, rx + 6, y + 12, 0xFF9A9AA8, false);
+				g.text(font, fit(r.title, rw - 10), rx + 6, y + 2, r.color, false);
+				g.text(font, fit(r.sub, rw - 10), rx + 6, y + 12, 0xFF9A9AA8, false);
 			}
 			y += RESULT_ROW;
 		}
 		g.disableScissor();
 		super.extractRenderState(g, mouseX, mouseY, delta);
+	}
+
+	/** Cuts text to a pixel width, ending with an ellipsis when something was cut. */
+	private String fit(String text, int maxWidth) {
+		if (font.width(text) <= maxWidth) {
+			return text;
+		}
+		int end = text.length();
+		while (end > 0 && font.width(text.substring(0, end) + "…") > maxWidth) {
+			end--;
+		}
+		return text.substring(0, end) + "…";
 	}
 
 	// ---------------------------------------------------------------- input

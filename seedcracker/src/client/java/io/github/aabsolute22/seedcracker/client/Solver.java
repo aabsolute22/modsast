@@ -217,15 +217,26 @@ public final class Solver {
 		BiomeCheck netherCheck = new BiomeCheck(worldgen, SeedWorld.Dim.NETHER);
 		Set<Long> full = new LinkedHashSet<>();
 		Long hashed = session.hashedSeed();
+		List<Long> byHash = new ArrayList<>();
 		if (hashed != null) {
 			session.setStatus(Session.Phase.UPPER_BITS, "сид структур найден, достаю остальные 16 бит по хэшу");
 			for (long ss : structureSeeds) {
 				for (long seed : SeedHash.fullSeeds(ss, hashed)) {
+					byHash.add(seed);
 					if (biomesAgree(overCheck, netherCheck, seed, over, nether)) {
 						full.add(seed);
 					}
 				}
 			}
+		}
+		if (full.isEmpty() && byHash.size() == 1) {
+			// 64 hash bits cannot match by chance; biomes only disagree on superflat, amplified or datapack worlds.
+			long seed = byHash.get(0);
+			fullCandidates = List.of();
+			session.setSeed(seed, "cracked");
+			session.setStatus(Session.Phase.SOLVED, "сид " + seed + " (по хэшу, биомы другие: плоский мир или датапак)");
+			SeedCrackerClient.onSolved(seed);
+			return;
 		}
 		if (full.isEmpty()) {
 			List<Long> previous = fullCandidates;
