@@ -155,11 +155,59 @@ public final class Solver {
 				return;
 			}
 			if (seeds.isEmpty()) {
+				if (dropSuspect(obs, settings)) {
+					request();
+					return;
+				}
 				session.setStatus(Session.Phase.CONTRADICTION, "ни один сид не подходит, проверь /sc structures");
 				return;
 			}
 		}
 		upperBits(worldgen, seeds, settings);
+	}
+
+	/**
+	 * One wrong detection makes every seed fail. If leaving out exactly one automatic observation brings seeds back
+	 * (and those searches are quick), that observation is removed.
+	 */
+	private boolean dropSuspect(List<Observation> obs, Settings settings) {
+		List<Session.Obs> all = session.observations();
+		if (all.size() < 3 || all.size() != obs.size()) {
+			return false;
+		}
+		session.setStatus(Session.Phase.CRACKING, "противоречие, ищу ошибочную находку");
+		int threads = settings.threadCount();
+		long deadline = System.currentTimeMillis() + 120_000;
+		List<Integer> suspects = new ArrayList<>();
+		for (int i = 0; i < obs.size(); i++) {
+			if (!all.get(i).auto || System.currentTimeMillis() > deadline) {
+				continue;
+			}
+			List<Observation> rest = new ArrayList<>(obs);
+			rest.remove(i);
+			StructureSeedCracker c = new StructureSeedCracker(rest, MAX_SEEDS);
+			if (c.expectedFalseSeeds() > MAX_FALSE_SEEDS || c.estimatedNanos() / 1e9 / threads > 20) {
+				continue;
+			}
+			cracker = c;
+			StructureSeedCracker.Result r = c.run(threads);
+			cracker = null;
+			if (r.cancelled()) {
+				return false;
+			}
+			if (!r.seeds().isEmpty() && !r.overflow()) {
+				suspects.add(i);
+			}
+		}
+		if (suspects.size() != 1) {
+			return false;
+		}
+		Session.Obs bad = all.get(suspects.get(0));
+		session.removeObservation(bad.id);
+		SeedCrackerClient.LOG.info("Dropped inconsistent observation #{} {}", bad.id, bad.describe());
+		net.minecraft.client.Minecraft.getInstance().execute(() -> SeedCrackerClient.message(net.minecraft.network.chat.Component
+				.literal("[SC] Убрал ошибочную находку #" + bad.id + ": " + bad.describe()).withStyle(net.minecraft.ChatFormatting.YELLOW)));
+		return true;
 	}
 
 	private void upperBits(Worldgen worldgen, List<Long> structureSeeds, Settings settings) {

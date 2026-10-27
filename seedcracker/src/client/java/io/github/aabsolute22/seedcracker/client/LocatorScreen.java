@@ -35,12 +35,12 @@ public final class LocatorScreen extends Screen {
 	}
 
 	private static String lastQuery = "";
-	private static String lastSelected = "found";
+	private static String lastSelected;
 
 	private EditBox search;
 	private final List<Category> categories = new ArrayList<>();
 	private List<Category> filtered = new ArrayList<>();
-	private String selected = lastSelected;
+	private String selected;
 	private double leftScroll;
 	private double rightScroll;
 	private List<Row> rows = List.of();
@@ -53,6 +53,12 @@ public final class LocatorScreen extends Screen {
 	@Override
 	protected void init() {
 		buildCategories();
+		if (selected == null) {
+			Session s = SeedCrackerClient.session();
+			boolean nether = SeedCrackerClient.currentDim() == SeedWorld.Dim.NETHER;
+			selected = lastSelected != null && categories.stream().anyMatch(c -> c.id.equals(lastSelected)) ? lastSelected
+					: s != null && s.seed() != null ? (nether ? "s:fortress" : "s:village") : "found";
+		}
 		search = new EditBox(font, 10, 22, LEFT_W, 16, Component.literal("search"));
 		search.setHint(Component.literal(SeedCrackerClient.russian() ? "Поиск: деревня, крепость, вишнёвая роща…" : "Search: village, fortress, cherry…"));
 		search.setMaxLength(64);

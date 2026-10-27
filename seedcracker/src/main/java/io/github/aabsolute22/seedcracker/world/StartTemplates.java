@@ -65,7 +65,7 @@ public final class StartTemplates {
 			return switch (rule) {
 				case JIGSAW -> BlockPos.ZERO.subtract(StructureTemplate.transform(pivot, Mirror.NONE, rotation, BlockPos.ZERO));
 				case PIVOT -> offset;
-				case CENTER_MIRROR -> BlockPos.ZERO;
+				case CENTER_MIRROR, CHILD -> BlockPos.ZERO;
 			};
 		}
 

@@ -259,9 +259,12 @@ public final class Session {
 		return o;
 	}
 
+	/** Removing evidence can only widen the answer, so the cached structure seeds are dropped too. */
 	public synchronized boolean removeObservation(int id) {
 		boolean removed = data.observations.removeIf(o -> o.id == id);
 		if (removed) {
+			data.structureSeeds = new ArrayList<>();
+			data.structureSeedsOverflow = false;
 			markDirty();
 		}
 		return removed;
