@@ -1,0 +1,24 @@
+{
+	"schemaVersion": 1,
+	"id": "seedcracker",
+	"version": "${version}",
+	"name": "Seed Cracker",
+	"description": "Cracks the world seed from structures and biomes the client sees, then finds structures and biomes in the Overworld and the Nether.",
+	"authors": ["aabsolute22"],
+	"contact": {
+		"sources": "https://github.com/aabsolute22/modsast"
+	},
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"io.github.aabsolute22.seedcracker.client.SeedCrackerClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

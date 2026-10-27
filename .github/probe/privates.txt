@@ -1,0 +1,12 @@
+# javap -p (fields and private members)
+net.minecraft.world.level.biome.BiomeManager
+net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate
+net.minecraft.world.level.levelgen.structure.structures.JigsawStructure
+net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement
+net.minecraft.world.level.levelgen.structure.pools.StructureTemplatePool
+net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
+net.minecraft.world.level.levelgen.structure.TemplateStructurePiece
+net.minecraft.world.level.levelgen.structure.structures.ShipwreckPieces
+net.minecraft.world.level.levelgen.structure.structures.IglooPieces
+net.minecraft.world.level.levelgen.structure.structures.OceanRuinPieces
+net.minecraft.world.level.levelgen.structure.structures.RuinedPortalStructure
