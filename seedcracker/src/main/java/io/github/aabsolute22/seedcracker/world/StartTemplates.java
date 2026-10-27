@@ -257,6 +257,15 @@ public final class StartTemplates {
 				}
 			}
 		}
+		if (anchor == null) {
+			int best = Integer.MAX_VALUE;
+			for (Map.Entry<String, Integer> e : counts.entrySet()) {
+				if (Canon.fallbackAnchor(e.getKey()) && e.getValue() < best) {
+					best = e.getValue();
+					anchor = e.getKey();
+				}
+			}
+		}
 		if (anchor == null || all.size() < 8) {
 			return;
 		}

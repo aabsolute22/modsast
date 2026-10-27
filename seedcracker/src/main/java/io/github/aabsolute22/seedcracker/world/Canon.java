@@ -20,6 +20,10 @@ public final class Canon {
 			"trial_spawner", "vault", "brewing_stand", "cauldron", "water_cauldron", "sea_pickle", "seagrass", "tall_seagrass", "kelp",
 			"kelp_plant", "dead_bush", "sweet_berry_bush", "hanging_roots", "glow_lichen", "moss_carpet", "pointed_dripstone");
 
+	/** Built blocks that also occur in villages, mineshafts and player bases: anchors only when nothing better exists. */
+	private static final Set<String> SEMI_NATURAL = Set.of("cobblestone", "mud_bricks", "wood_planks", "wood_slab", "wood_stairs", "wood_fence",
+			"stone_bricks", "nether_bricks", "wood_fence_gate", "wood_log", "wood_wood");
+
 	/** Too common in natural terrain to anchor a search on. */
 	private static final Set<String> NATURAL = Set.of("stone", "deepslate", "dirt", "sandstone", "red_sandstone", "terracotta", "clay", "netherrack",
 			"blackstone", "basalt", "smooth_basalt", "soul_sand", "soul_soil", "magma_block", "glowstone", "tuff", "calcite", "granite", "diorite",
@@ -70,5 +74,10 @@ public final class Canon {
 			return false;
 		}
 		return !canon.startsWith("amethyst");
+	}
+
+	/** Second choice when a template is made only of common building blocks (shipwrecks are all wood). */
+	public static boolean fallbackAnchor(String canon) {
+		return SEMI_NATURAL.contains(canon) && !canon.equals("wood_log") && !canon.equals("wood_wood");
 	}
 }

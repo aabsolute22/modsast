@@ -38,6 +38,10 @@ public final class Worldgen {
 		List<Registry.PendingTags<?>> pending = TagLoader.loadTagsForExistingRegistries(resources, layers.getLayer(RegistryLayer.STATIC));
 		RegistryAccess.Frozen forLoading = layers.getAccessForLoading(RegistryLayer.WORLDGEN);
 		List<HolderLookup.RegistryLookup<?>> lookups = TagLoader.buildUpdatedLookups(forLoading, pending);
+		// In game the static tags arrive from the server; without them (tests, title screen) bind the vanilla ones.
+		if (BuiltInRegistries.BLOCK.getTags().findAny().isEmpty()) {
+			pending.forEach(Registry.PendingTags::apply);
+		}
 		RegistryAccess.Frozen worldgen = RegistryDataLoader.load(resources, lookups, RegistryDataLoader.WORLDGEN_REGISTRIES, Runnable::run).join();
 		// Structure pieces also look up static registries (blocks for processors), so expose both layers.
 		registries = layers.replaceFrom(RegistryLayer.WORLDGEN, worldgen).compositeAccess();
