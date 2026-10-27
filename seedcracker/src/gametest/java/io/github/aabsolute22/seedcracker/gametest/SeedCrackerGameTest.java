@@ -206,6 +206,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 				}
 			}
 			check(falsePositives == 0, "every exact detection is a real structure (" + exact.size() + ")");
+			check(missed.isEmpty(), "every visited structure detected (" + hits + "/" + visits.size() + ")");
 			boolean solved = waitQuietly(context, mc -> session().phase() == Session.Phase.SOLVED, 6 * MINUTE);
 			log("final phase " + session().phase() + " · " + session().detail() + " · biome samples " + session().biomeSampleCount());
 			check(solved && session().seed() != null && session().seed() == SEED, "cracked the real seed " + SEED);
@@ -315,7 +316,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			if (matcher != null && p0 instanceof net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece pe
 					&& pe.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single) {
 				String path = single.getTemplateLocation().getPath();
-				io.github.aabsolute22.seedcracker.world.TemplateMatcher.BlockSource src = (x, y, z) -> mc.level.hasChunk(x >> 4, z >> 4)
+				io.github.aabsolute22.seedcracker.world.TemplateMatcher.BlockSource src = (x, y, z) -> mc.level.getChunkSource().getChunk(x >> 4, z >> 4, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false) != null
 						? SeedCrackerClient.scanner().canon(mc.level.getBlockState(new BlockPos(x, y, z)).getBlock()) : null;
 				b.append(" | start ").append(path).append(" at ").append(pe.getPosition().toShortString()).append(" rot ").append(pe.getRotation());
 				for (var spec : matcher.templates().specs()) {

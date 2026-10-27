@@ -158,7 +158,7 @@ public final class Scanner {
 		}
 		if (ticks % 200 == 7 && !parked.isEmpty()) {
 			for (long key : parked.keySet().toLongArray()) {
-				if (!level.hasChunk(Packed.x(key), Packed.z(key))) {
+				if (!loaded(level, Packed.x(key), Packed.z(key))) {
 					parked.remove(key);
 				}
 			}
@@ -304,14 +304,14 @@ public final class Scanner {
 	}
 
 	private String biomeAt(ClientLevel level, int x, int y, int z) {
-		if (!level.hasChunk(x >> 4, z >> 4)) {
+		if (!loaded(level, x >> 4, z >> 4)) {
 			return null;
 		}
 		return SeedWorld.biomeId(level.getNoiseBiome(x >> 2, y >> 2, z >> 2));
 	}
 
 	private String canonAt(ClientLevel level, BlockPos.MutableBlockPos pos, int x, int y, int z) {
-		if (!level.hasChunk(x >> 4, z >> 4)) {
+		if (!loaded(level, x >> 4, z >> 4)) {
 			return null;
 		}
 		return canon(level.getBlockState(pos.set(x, y, z)).getBlock());
@@ -398,7 +398,7 @@ public final class Scanner {
 			if (b != null) {
 				out.add(b);
 			}
-			if (dim == SeedWorld.Dim.OVERWORLD && level.hasChunk(bx >> 4, bz >> 4)) {
+			if (dim == SeedWorld.Dim.OVERWORLD && loaded(level, bx >> 4, bz >> 4)) {
 				int top = level.getHeight(Heightmap.Types.WORLD_SURFACE, bx, bz);
 				String s = biomeAt(level, bx, top, bz);
 				if (s != null) {
@@ -407,6 +407,14 @@ public final class Scanner {
 			}
 		}
 		return out;
+	}
+
+	/**
+	 * Whether the client really holds a chunk. {@code Level.hasChunk} is not it: on the client it also says yes for
+	 * chunks that have not arrived, and reading those gives air.
+	 */
+	private static boolean loaded(ClientLevel level, int chunkX, int chunkZ) {
+		return level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false) != null;
 	}
 
 	/** Non-empty sections of the chunks around one, to see whether any of them came in empty. */
@@ -432,7 +440,7 @@ public final class Scanner {
 	private static boolean nearUnloaded(ClientLevel level, int x, int z) {
 		for (int dx = -2; dx <= 2; dx++) {
 			for (int dz = -2; dz <= 2; dz++) {
-				if (!level.hasChunk((x >> 4) + dx, (z >> 4) + dz)) {
+				if (!loaded(level, (x >> 4) + dx, (z >> 4) + dz)) {
 					return true;
 				}
 			}
