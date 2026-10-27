@@ -76,7 +76,7 @@ public final class Commands {
 					}
 					return 1;
 				}))
-				.then(literal("ships").executes(ctx -> toggle(ctx.getSource(), "Только города с кораблями", () -> {
+				.then(literal("ships").executes(ctx -> toggle(ctx.getSource(), "Только города с кораблями (стрелка, маркеры, карта, список)", () -> {
 					Settings st = EndCityFinderClient.settings();
 					st.shipsOnly = !st.shipsOnly;
 					return st.shipsOnly;
@@ -162,7 +162,8 @@ public final class Commands {
 			source.sendFeedback(Component.literal(String.format("перебор: %.0f%%", p * 100)));
 		}
 		if (s.phase() == FinderSession.Phase.SOLVED || s.phase() == FinderSession.Phase.AMBIGUOUS) {
-			source.sendFeedback(Component.literal("предсказано городов рядом: " + s.predicted().size()));
+			source.sendFeedback(Component.literal("предсказано городов рядом: " + s.predicted().size()
+					+ " (с кораблями " + s.predicted().stream().filter(EndCity::ship).count() + ")"));
 		}
 		return 1;
 	}
@@ -283,7 +284,7 @@ public final class Commands {
 		}
 		double px = source.getPlayer().getX();
 		double pz = source.getPlayer().getZ();
-		List<EndCity> cities = new ArrayList<>(s.predicted());
+		List<EndCity> cities = new ArrayList<>(s.shown(EndCityFinderClient.settings()));
 		if (cities.isEmpty()) {
 			source.sendFeedback(Component.literal("Предсказаний пока нет: " + s.detail()));
 			return 1;

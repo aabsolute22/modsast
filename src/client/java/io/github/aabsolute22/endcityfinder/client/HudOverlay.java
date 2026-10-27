@@ -36,8 +36,9 @@ public final class HudOverlay {
 	static String statusText(FinderSession s) {
 		StringBuilder b = new StringBuilder("ECF · ");
 		switch (s.phase()) {
-			case SOLVED -> b.append("сид найден · городов рядом ").append(s.predicted().size());
-			case AMBIGUOUS -> b.append("кандидатов ").append(s.candidateCount()).append(" · общих городов ").append(s.predicted().size());
+			case SOLVED -> b.append("сид найден · ").append(EndCityFinderClient.settings().shipsOnly ? "кораблей рядом " : "городов рядом ")
+					.append(s.shown(EndCityFinderClient.settings()).size());
+			case AMBIGUOUS -> b.append("кандидатов ").append(s.candidateCount()).append(" · общих городов ").append(s.shown(EndCityFinderClient.settings()).size());
 			case SEARCHING -> b.append(String.format("перебор %.0f%%", Math.max(0, s.progress()) * 100));
 			case FILTERING -> b.append("проверяю кандидатов");
 			case NEED_PILLARS -> b.append("нужны пилоны ").append(s.knownSpikes()).append("/10");

@@ -55,7 +55,7 @@ public final class WorldMarkers {
 		}
 		Vec3 cam = context.levelState().cameraRenderState.pos;
 		EndCity target = s.target(cam.x, cam.z, settings);
-		List<EndCity> cities = new ArrayList<>(s.predicted());
+		List<EndCity> cities = new ArrayList<>(s.shown(settings));
 		cities.sort(Comparator.comparingDouble(c -> Math.hypot(c.x() - cam.x, c.z() - cam.z)));
 		// Gizmos past the render distance are not drawn, so only cities well inside it get the full treatment.
 		double nearLimit = Math.min(settings.nearDistance, mc.options.getEffectiveRenderDistance() * 16 * 0.75);

@@ -95,7 +95,7 @@ public final class EndMapScreen extends Screen {
 		double pz = mc.player != null ? mc.player.getZ() : centerZ;
 		EndCity target = s.target(px, pz, settings);
 		EndCity hovered = null;
-		for (EndCity city : s.predicted()) {
+		for (EndCity city : s.shown(settings)) {
 			int x = screenX(city.x());
 			int z = screenZ(city.z());
 			if (x < -8 || z < -8 || x > width + 8 || z > height + 8) {
@@ -211,7 +211,7 @@ public final class EndMapScreen extends Screen {
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		FinderSession s = EndCityFinderClient.session();
 		if (s != null && event.button() == 1) {
-			for (EndCity city : s.predicted()) {
+			for (EndCity city : s.shown(EndCityFinderClient.settings())) {
 				if (Math.abs(event.x() - screenX(city.x())) <= 5 && Math.abs(event.y() - screenZ(city.z())) <= 5) {
 					s.setTarget(city);
 					return true;

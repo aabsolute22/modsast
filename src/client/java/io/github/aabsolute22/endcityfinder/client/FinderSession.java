@@ -562,6 +562,12 @@ public final class FinderSession {
 		return predicted;
 	}
 
+	/** The predicted cities the player wants to see: only those with a ship when {@code shipsOnly} is on. */
+	public List<EndCity> shown(Settings settings) {
+		List<EndCity> all = predicted;
+		return settings.shipsOnly ? all.stream().filter(EndCity::ship).toList() : all;
+	}
+
 	/** Whether {@link #predicted()} belongs to the current solver result. */
 	public boolean predictionsCurrent() {
 		return !worlds.isEmpty() && predictedFor == worlds;
