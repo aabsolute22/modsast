@@ -100,3 +100,21 @@ net.minecraft.world.level.levelgen.structure.structures.BuriedTreasureStructure
 net.minecraft.world.level.levelgen.structure.structures.BuriedTreasurePieces$BuriedTreasurePiece
 net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents
 net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
+net.minecraft.resources.ResourceKey|public
+net.minecraft.resources.Identifier|public .*(get|with|from|parse|tryParse|toString)
+net.minecraft.world.level.levelgen.structure.StructureStart|public
+net.minecraft.world.level.levelgen.structure.pieces.StructurePieceType| [A-Z_]+;
+net.minecraft.world.level.chunk.LevelChunk|public
+net.minecraft.client.multiplayer.ClientChunkCache|public
+net.minecraft.world.level.block.Rotation|public
+net.minecraft.world.level.block.Mirror|public
+net.minecraft.client.Minecraft|getSingleplayerServer|isLocalServer|getCurrentServer|level;|player;|font;|options;
+net.minecraft.server.MinecraftServer|getWorldData|overworld|getLevel
+net.minecraft.world.level.storage.WorldData|worldGenOptions|getLevelName
+net.minecraft.world.level.levelgen.WorldGenSettings|options
+net.minecraft.client.renderer.state.level.CameraRenderState
+net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext
+net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents
+net.minecraft.client.gui.components.AbstractWidget|public
+net.minecraft.client.gui.components.Checkbox|public
+net.minecraft.client.gui.components.CycleButton|public static|builder
