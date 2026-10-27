@@ -75,7 +75,6 @@ public final class AddScreen extends Screen {
 	private EditBox coordBox(int x, int y, String value) {
 		EditBox box = new EditBox(font, x, y, 76, 16, Component.literal("coord"));
 		box.setMaxLength(9);
-		box.setFilter(t -> t.isEmpty() || t.matches("-?\\d*"));
 		box.setValue(value);
 		box.setResponder(t -> dirty = 1);
 		addRenderableWidget(box);
