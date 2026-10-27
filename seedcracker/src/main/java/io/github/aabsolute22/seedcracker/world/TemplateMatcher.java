@@ -62,6 +62,22 @@ public final class TemplateMatcher {
 		return out;
 	}
 
+	/** Plain counts {matched, checked} of a variant at a placement, for diagnostics. */
+	public static int[] count(StartTemplates.Variant v, int originX, int baseY, int originZ, BlockSource source) {
+		int matched = 0;
+		int checked = 0;
+		for (int i = 0; i < v.dx().length; i++) {
+			String c = source.canonAt(originX + v.dx()[i], baseY + v.dy()[i], originZ + v.dz()[i]);
+			if (c != null) {
+				checked++;
+				if (c.equals(v.canon()[i])) {
+					matched++;
+				}
+			}
+		}
+		return new int[] {matched, checked};
+	}
+
 	/** Scores a variant placed at (originX, baseY, originZ); null if it clearly does not fit. */
 	public static Match score(StartTemplates.Variant v, int originX, int baseY, int originZ, TemplateMatcher.BlockSource source) {
 		int n = v.dx().length;

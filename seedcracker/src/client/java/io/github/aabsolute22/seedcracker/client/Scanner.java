@@ -79,6 +79,14 @@ public final class Scanner {
 		return scanned.size();
 	}
 
+	public TemplateMatcher matcher() {
+		return matcher;
+	}
+
+	public int pendingHits() {
+		return hits.size();
+	}
+
 	public void enqueue(int chunkX, int chunkZ) {
 		long key = Packed.pack(chunkX, chunkZ);
 		if (queued.add(key)) {
@@ -299,6 +307,10 @@ public final class Scanner {
 				continue;
 			}
 			retries.remove(h);
+			TemplateMatcher.Match m0 = matches.get(0);
+			SeedCrackerClient.LOG.info("Template match {} {} rot {} mirror {} start {} at chunk {} {} y {} score {}/{} from {} at {} {} {}",
+					m0.kind().id(), m0.variant().spec().template(), m0.variant().rotation(), m0.variant().mirror(), m0.variant().startRotation(),
+					m0.chunkX(), m0.chunkZ(), m0.baseY(), m0.matched(), m0.checked(), h.canon, h.x, h.y, h.z);
 			report(level, session, solver, matches);
 		}
 	}

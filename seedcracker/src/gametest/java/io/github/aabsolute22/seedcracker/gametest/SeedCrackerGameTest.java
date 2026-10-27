@@ -8,6 +8,7 @@ import java.util.function.Predicate;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -156,6 +157,7 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 					hits++;
 				} else {
 					missed.add(v.kind.id());
+					diagnose(context, over, nether, v);
 				}
 				if (solvedAt == null && session().phase() == Session.Phase.SOLVED) {
 					solvedAt = session().phase();
@@ -163,8 +165,14 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 				}
 			}
 			log("detected " + hits + "/" + visits.size() + ", missed " + missed);
-			for (Session.Obs o : session().observations()) {
-				log("  observation #" + o.id + " " + o.describe() + " note " + o.note);
+			for (String line : context.computeOnClient(mc -> {
+				List<String> out = new ArrayList<>();
+				for (Session.Obs o : session().observations()) {
+					out.add("  observation #" + o.id + " " + o.describe() + " at " + o.x + " " + o.y + " " + o.z + " note " + o.note);
+				}
+				return out;
+			})) {
+				log(line);
 			}
 			boolean solved = waitQuietly(context, mc -> session().phase() == Session.Phase.SOLVED, 6 * MINUTE);
 			log("final phase " + session().phase() + " · " + session().detail() + " · biome samples " + session().biomeSampleCount());
@@ -218,6 +226,50 @@ public class SeedCrackerGameTest implements FabricClientGameTest {
 			context.takeScreenshot("sc_status");
 			log("done");
 		}
+	}
+
+	/** Why a structure was missed: the matcher's score at the true placement and what the client sees there. */
+	private static void diagnose(ClientGameTestContext context, SeedWorld over, SeedWorld nether, Visit v) {
+		SeedWorld w = v.dim == SeedWorld.Dim.NETHER ? nether : over;
+		var start = w.startAt(w.set(v.kind.spread), v.found.chunkX(), v.found.chunkZ());
+		if (start.isEmpty()) {
+			log("  diag: no start");
+			return;
+		}
+		var pieces = start.get().getPieces();
+		log("  diag: " + pieces.size() + " pieces, first " + pieces.get(0).getClass().getSimpleName() + " box " + pieces.get(0).getBoundingBox()
+				+ " rot " + pieces.get(0).getRotation() + " orientation " + pieces.get(0).getOrientation());
+		String report = context.computeOnClient(mc -> {
+			StringBuilder b = new StringBuilder();
+			var matcher = SeedCrackerClient.scanner().matcher();
+			b.append("scanned ").append(SeedCrackerClient.scanner().scannedChunks()).append(" pending hits ").append(SeedCrackerClient.scanner().pendingHits());
+			b.append(" minY ").append(mc.level.getMinY()).append(" chunk minY ").append(mc.level.getChunk(v.found.chunkX(), v.found.chunkZ()).getMinY());
+			b.append(" sections ").append(mc.level.getChunk(v.found.chunkX(), v.found.chunkZ()).getSections().length);
+			var p0 = pieces.get(0);
+			BlockPos center = p0.getBoundingBox().getCenter();
+			b.append(" block at piece centre ").append(mc.level.getBlockState(center).getBlock());
+			// Raw blocks around the piece centre, to see what the client really has there.
+			for (int dy = -2; dy <= 2; dy++) {
+				b.append(dy == -2 ? " column " : ",").append(SeedCrackerClient.scanner().canon(mc.level.getBlockState(center.offset(0, dy, 0)).getBlock()));
+			}
+			if (matcher != null && p0 instanceof net.minecraft.world.level.levelgen.structure.TemplateStructurePiece t) {
+				for (var spec : matcher.templates().specs()) {
+					if (spec.kind() == v.kind && w == w) {
+						for (var variant : spec.variants()) {
+							if (variant.rotation() == t.placeSettings().getRotation() && variant.mirror() == t.placeSettings().getMirror()) {
+								int[] m = io.github.aabsolute22.seedcracker.world.TemplateMatcher.count(variant, v.found.chunkX() * 16, t.templatePosition().getY(),
+										v.found.chunkZ() * 16, (x, y, z) -> SeedCrackerClient.scanner().canon(mc.level.getBlockState(new BlockPos(x, y, z)).getBlock()));
+								if (m[0] * 2 > m[1]) {
+									b.append(" | ").append(spec.template()).append(' ').append(m[0]).append('/').append(m[1]);
+								}
+							}
+						}
+					}
+				}
+			}
+			return b.toString();
+		});
+		log("  diag: " + report);
 	}
 
 	private static void check(boolean condition, String message) {
