@@ -22,6 +22,9 @@ import io.github.aabsolute22.seedcracker.world.SeedWorld;
  * one by one.
  */
 public final class ManualAdd {
+	/** More possible start chunks than this say too little to be worth trying one by one. */
+	private static final int MAX_CANDIDATES = 9;
+
 	/** What adding would do; {@code error} set when it cannot be added. */
 	public record Plan(StructureKind kind, List<int[]> candidates, int pick, boolean fromBlocks, int x, int y, int z, String note, String error) {
 		public boolean ok() {
@@ -98,6 +101,10 @@ public final class ManualAdd {
 		}
 		if (cands.isEmpty()) {
 			return fail(kind, x, y, z, "здесь " + SeedCrackerClient.name(kind) + " начаться не может: проверь тип и координаты");
+		}
+		if (cands.size() > MAX_CANDIDATES) {
+			return fail(kind, x, y, z, "по этой точке подходит " + cands.size() + " чанков, слишком неточно. Подойди ближе, чтобы мод увидел блоки, или укажи чанк: /sc add "
+					+ kind.id() + " chunk <x> <z>");
 		}
 		return new Plan(kind, cands, -1, false, x, y, z, "manual", null);
 	}
