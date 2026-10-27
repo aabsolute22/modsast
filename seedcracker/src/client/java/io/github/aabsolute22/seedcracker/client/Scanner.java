@@ -39,6 +39,8 @@ import io.github.aabsolute22.seedcracker.world.Worldgen;
  */
 public final class Scanner {
 	private static final int CHUNKS_PER_TICK = 4;
+	/** How many times (every 2 s) a start that almost fits is looked at again before giving up. */
+	private static final int NEAR_MISS_RETRIES = 30;
 
 	/** A rare block that may belong to a start piece; matched once the surrounding chunks are in. */
 	private record Hit(int x, int y, int z, String canon) {
@@ -54,6 +56,9 @@ public final class Scanner {
 	private final List<Hit> hits = new ArrayList<>();
 	/** Hits that did not match while chunks around them were missing, by their chunk; retried when a neighbour arrives. */
 	private final Long2ObjectOpenHashMap<List<Hit>> parked = new Long2ObjectOpenHashMap<>();
+	/** Hits whose start almost fits although all chunks are there: chunk data can still be settling, so look again later. */
+	private final List<Hit> later = new ArrayList<>();
+	private final Map<Hit, Integer> nearMisses = new HashMap<>();
 	private final Long2ObjectOpenHashMap<Extent> prismarine = new Long2ObjectOpenHashMap<>();
 	private final LongOpenHashSet fortressChecked = new LongOpenHashSet();
 	/** Chunks full of prismarine whose monument could not be measured yet (neighbours missing). */
@@ -71,6 +76,8 @@ public final class Scanner {
 		scanned.clear();
 		hits.clear();
 		parked.clear();
+		later.clear();
+		nearMisses.clear();
 		prismarine.clear();
 		fortressChecked.clear();
 		monumentPending.clear();
@@ -144,6 +151,10 @@ public final class Scanner {
 		}
 		if (++ticks % 10 == 0) {
 			matchHits(level, session, solver);
+		}
+		if (ticks % 40 == 13 && !later.isEmpty()) {
+			hits.addAll(later);
+			later.clear();
 		}
 		if (ticks % 200 == 7 && !parked.isEmpty()) {
 			for (long key : parked.keySet().toLongArray()) {
@@ -223,9 +234,11 @@ public final class Scanner {
 						int wy = baseY + y;
 						int wz = cz * 16 + z;
 						if (anchorCanons.contains(c)) {
-							// One anchor of the right start is enough; a few spread-out ones keep villages full of planks cheap.
+							// Rare anchors are all looked at (a start may have just one among dozens of its neighbours'); common
+							// building blocks are sampled, which keeps villages full of planks cheap.
 							int seen = anchorsSeen.merge(c, 1, Integer::sum);
-							if (seen <= 4 || seen % 24 == 0 && seen <= 240) {
+							boolean common = Canon.fallbackAnchor(c);
+							if (common ? seen <= 4 || seen % 24 == 0 && seen <= 240 : seen <= 96) {
 								hits.add(new Hit(wx, wy, wz, c));
 							}
 						}
@@ -349,9 +362,24 @@ public final class Scanner {
 						parked.put(key, waiting);
 					}
 					waiting.add(h);
+				} else {
+					int[] best = matcher.best(h.x, h.y, h.z, h.canon, source, filter);
+					if (best[0] * 2 > best[1]) {
+						int n = nearMisses.merge(h, 1, Integer::sum);
+						if (n == 1) {
+							SeedCrackerClient.LOG.info("Near miss from {} at {} {} {}: {}/{}, chunks {}", h.canon, h.x, h.y, h.z, best[0], best[1],
+									chunkStates(level, h.x >> 4, h.z >> 4));
+						}
+						if (n < NEAR_MISS_RETRIES) {
+							later.add(h);
+						} else {
+							nearMisses.remove(h);
+						}
+					}
 				}
 				continue;
 			}
+			nearMisses.remove(h);
 			TemplateMatcher.Match m0 = matches.get(0);
 			SeedCrackerClient.LOG.info("Template match {} {} rot {} mirror {} start {} at chunk {} {} y {} score {}/{} from {} at {} {} {}",
 					m0.kind().id(), m0.variant().spec().template(), m0.variant().rotation(), m0.variant().mirror(), m0.variant().startRotation(),
@@ -379,6 +407,26 @@ public final class Scanner {
 			}
 		}
 		return out;
+	}
+
+	/** Non-empty sections of the chunks around one, to see whether any of them came in empty. */
+	private static String chunkStates(ClientLevel level, int cx, int cz) {
+		StringBuilder b = new StringBuilder();
+		for (int dz = -1; dz <= 1; dz++) {
+			for (int dx = -1; dx <= 1; dx++) {
+				LevelChunk c = level.getChunkSource().getChunk(cx + dx, cz + dz, ChunkStatus.FULL, false);
+				int filled = 0;
+				if (c != null) {
+					for (LevelChunkSection section : c.getSections()) {
+						if (section != null && !section.hasOnlyAir()) {
+							filled++;
+						}
+					}
+				}
+				b.append(dx == -1 && dz == -1 ? "" : dx == -1 ? " / " : ",").append(c == null ? "-" : Integer.toString(filled));
+			}
+		}
+		return b.toString();
 	}
 
 	private static boolean nearUnloaded(ClientLevel level, int x, int z) {

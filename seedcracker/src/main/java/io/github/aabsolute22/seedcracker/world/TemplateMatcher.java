@@ -62,6 +62,31 @@ public final class TemplateMatcher {
 		return out;
 	}
 
+	/**
+	 * Best {matched, checked} over the chunk-aligned placements an anchor allows, ignoring the threshold; a high ratio
+	 * that still fails means the start is there but some of its blocks are not right yet.
+	 */
+	public int[] best(int x, int y, int z, String canon, BlockSource source, java.util.function.Predicate<StartTemplates.Spec> filter) {
+		int[] best = {0, 0};
+		for (StartTemplates.Variant v : templates.variantsAnchoredOn(canon)) {
+			if (!filter.test(v.spec())) {
+				continue;
+			}
+			for (int i : v.anchors()) {
+				int ox = x - v.dx()[i];
+				int oz = z - v.dz()[i];
+				if ((ox & 15) != 0 || (oz & 15) != 0) {
+					continue;
+				}
+				int[] c = count(v, ox, y - v.dy()[i], oz, source);
+				if (c[1] >= 10 && (long) c[0] * Math.max(1, best[1]) > (long) best[0] * c[1]) {
+					best = c;
+				}
+			}
+		}
+		return best;
+	}
+
 	/** Plain counts {matched, checked} of a variant at a placement, for diagnostics. */
 	public static int[] count(StartTemplates.Variant v, int originX, int baseY, int originZ, BlockSource source) {
 		int matched = 0;
