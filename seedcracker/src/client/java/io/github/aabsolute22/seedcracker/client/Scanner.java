@@ -56,6 +56,8 @@ public final class Scanner {
 	private final Map<Hit, Integer> retries = new HashMap<>();
 	private final Long2ObjectOpenHashMap<Extent> prismarine = new Long2ObjectOpenHashMap<>();
 	private final LongOpenHashSet fortressChecked = new LongOpenHashSet();
+	/** Chunks full of prismarine whose monument could not be measured yet (neighbours missing). */
+	private final LongOpenHashSet monumentPending = new LongOpenHashSet();
 	private final Set<String> reported = new HashSet<>();
 	private final Map<Block, String> canon = new IdentityHashMap<>();
 	private Set<String> anchorCanons = Set.of();
@@ -71,6 +73,7 @@ public final class Scanner {
 		retries.clear();
 		prismarine.clear();
 		fortressChecked.clear();
+		monumentPending.clear();
 		reported.clear();
 		dim = null;
 	}
@@ -141,6 +144,13 @@ public final class Scanner {
 		}
 		if (++ticks % 10 == 0) {
 			matchHits(level, session, solver);
+		}
+		if (ticks % 40 == 5 && !monumentPending.isEmpty()) {
+			for (long key : monumentPending.toLongArray()) {
+				if (checkMonument(session, Packed.x(key), Packed.z(key)) != 0) {
+					monumentPending.remove(key);
+				}
+			}
 		}
 	}
 
@@ -237,7 +247,7 @@ public final class Scanner {
 			checkJungleTemple(level, session, chunk, counts);
 			checkSwampHut(level, session, chunk, counts);
 			if (pCount > 50) {
-				checkMonument(session, cx, cz);
+				monumentPending.add(Packed.pack(cx, cz));
 			}
 		} else if (counts.getOrDefault("nether_bricks", 0) > 30) {
 			checkFortress(level, session, cx, cz);
@@ -411,11 +421,14 @@ public final class Scanner {
 	/** The whole temple (12x15) fits in its start chunk, so the chunk holding its redstone is the start. */
 	private void checkJungleTemple(ClientLevel level, Session session, LevelChunk chunk, Map<String, Integer> counts) {
 		int mechanism = counts.getOrDefault("sticky_piston", 0) + counts.getOrDefault("dispenser", 0);
-		if (mechanism < 2 || counts.getOrDefault("cobblestone", 0) < 40) {
+		if (mechanism < 2) {
 			return;
 		}
 		int cx = chunk.getPos().x();
 		int cz = chunk.getPos().z();
+		if (countInChunk(chunk, "cobblestone") < 60) {
+			return;
+		}
 		String biome = biomeAt(level, cx * 16 + 8, 80, cz * 16 + 8);
 		if (biome != null && biome.contains("jungle")) {
 			addExact(session, StructureKind.JUNGLE_TEMPLE, cx, cz, -1, cx * 16 + 6, chunk.getHeight(Heightmap.Types.WORLD_SURFACE, 6, 7), cz * 16 + 7, "redstone");
@@ -424,15 +437,38 @@ public final class Scanner {
 
 	/** The hut (7x9) also fits in its start chunk: cauldron, crafting table and spruce walls on stilts. */
 	private void checkSwampHut(ClientLevel level, Session session, LevelChunk chunk, Map<String, Integer> counts) {
-		if (counts.getOrDefault("cauldron", 0) < 1 || counts.getOrDefault("crafting_table", 0) < 1 || counts.getOrDefault("wood_planks", 0) < 20) {
+		if (counts.getOrDefault("cauldron", 0) < 1 || counts.getOrDefault("crafting_table", 0) < 1) {
 			return;
 		}
 		int cx = chunk.getPos().x();
 		int cz = chunk.getPos().z();
+		if (countInChunk(chunk, "wood_planks") < 20) {
+			return;
+		}
 		String biome = biomeAt(level, cx * 16 + 8, 64, cz * 16 + 8);
 		if ("swamp".equals(biome)) {
 			addExact(session, StructureKind.SWAMP_HUT, cx, cz, -1, cx * 16 + 3, 64, cz * 16 + 4, "hut");
 		}
+	}
+
+	/** How many blocks of one canonical type a chunk has (only sections that may contain it are read). */
+	private int countInChunk(LevelChunk chunk, String target) {
+		int n = 0;
+		for (LevelChunkSection section : chunk.getSections()) {
+			if (section == null || section.hasOnlyAir() || !section.maybeHas(st -> canon(st.getBlock()).equals(target))) {
+				continue;
+			}
+			for (int y = 0; y < 16; y++) {
+				for (int z = 0; z < 16; z++) {
+					for (int x = 0; x < 16; x++) {
+						if (canon(section.getBlockState(x, y, z).getBlock()).equals(target)) {
+							n++;
+						}
+					}
+				}
+			}
+		}
+		return n;
 	}
 
 	/** Buried treasure always sits at (9, 9) of its chunk, under sand or stone. */
@@ -456,8 +492,11 @@ public final class Scanner {
 		}
 	}
 
-	/** A monument is 58 blocks square around its start chunk's corner; wait until its prismarine is all loaded. */
-	private void checkMonument(Session session, int cx, int cz) {
+	/**
+	 * A monument is 58 blocks square around the corner of its start chunk. Returns 0 while its surroundings are
+	 * still loading, 1 when done (found or not).
+	 */
+	private int checkMonument(Session session, int cx, int cz) {
 		int minX = Integer.MAX_VALUE;
 		int maxX = Integer.MIN_VALUE;
 		int minZ = Integer.MAX_VALUE;
@@ -466,7 +505,7 @@ public final class Scanner {
 			for (int dz = -4; dz <= 4; dz++) {
 				long key = Packed.pack(cx + dx, cz + dz);
 				if (!scanned.contains(key)) {
-					return;
+					return 0;
 				}
 				Extent e = prismarine.get(key);
 				if (e != null && e.count > 8) {
@@ -477,14 +516,28 @@ public final class Scanner {
 				}
 			}
 		}
-		if (maxX - minX != 57 || maxZ - minZ != 57) {
-			return;
-		}
-		int ox = minX + 29;
-		int oz = minZ + 29;
-		if ((ox & 15) == 0 && (oz & 15) == 0) {
+		SeedCrackerClient.LOG.info("Monument extents around chunk {} {}: x {}..{} z {}..{}", cx, cz, minX, maxX, minZ, maxZ);
+		int ox = monumentOrigin(minX, maxX);
+		int oz = monumentOrigin(minZ, maxZ);
+		if (ox != Integer.MIN_VALUE && oz != Integer.MIN_VALUE) {
 			addExact(session, StructureKind.OCEAN_MONUMENT, ox >> 4, oz >> 4, -1, ox, 50, oz, "walls");
 		}
+		return 1;
+	}
+
+	/** The building spans origin-29..origin+28; a little erosion at one edge is tolerated. */
+	private static int monumentOrigin(int min, int max) {
+		int width = max - min;
+		if (width < 50 || width > 57) {
+			return Integer.MIN_VALUE;
+		}
+		if (((min + 29) & 15) == 0) {
+			return min + 29;
+		}
+		if (((max - 28) & 15) == 0) {
+			return max - 28;
+		}
+		return Integer.MIN_VALUE;
 	}
 
 	/**
